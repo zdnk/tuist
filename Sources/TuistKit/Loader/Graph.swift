@@ -49,6 +49,7 @@ protocol Graphing: AnyObject {
     func dependencies(path: AbsolutePath, name: String) -> Set<GraphNode>
     func dependencies(path: AbsolutePath) -> Set<GraphNode>
     func targetDependencies(path: AbsolutePath, name: String) -> [String]
+    func staticLibraryDependencies(path: AbsolutePath, name: String) -> [DependencyReference]
 }
 
 class Graph: Graphing {
@@ -109,6 +110,21 @@ class Graph: Graphing {
             .filter({ $0.path == path })
             .map({ $0.target.name })
     }
+    
+    func staticLibraryDependencies(path: AbsolutePath, name: String) -> [DependencyReference] {
+        
+        guard let targetNode = self.targetNode(path: path, name: name) else {
+            return [ ]
+        }
+
+        return targetNode.dependencies
+            .compactMap{ $0 as? TargetNode }
+            .filter{ $0.target.product == .staticLibrary }
+            .map{ targetNode in
+                return DependencyReference.product(targetNode.target.productName)
+            }
+        
+    }
 
     func linkableDependencies(path: AbsolutePath, name: String) throws -> [DependencyReference] {
         guard let targetNode = self.targetNode(path: path, name: name) else { return [] }
@@ -120,20 +136,61 @@ class Graph: Graphing {
             .dependencies
             .compactMap({ $0 as? PrecompiledNode })
             .map({ DependencyReference.absolute($0.path) }))
+        
+        switch targetNode.target.product {
+        case .staticLibrary, .dynamicLibrary, .framework:
+            // Ignore the products, they do not want to directly link the static libraries, the top level bundles will be responsible.
+            break
+        case .app, .unitTests, .uiTests:
+            
+            // Find all static libraries and add them to the references.
 
-        /// Other targets frameworks and libraries
-        try references.append(contentsOf: targetNode
-            .dependencies
-            .compactMap({ $0 as? TargetNode })
-            .filter({ $0.target.isLinkable() })
-            .map({ targetNode in
-                let xcodeProduct = targetNode.target.product.xcodeValue
-                guard let `extension` = xcodeProduct.fileExtension else {
-                    throw GraphError.unsupportedFileExtension(xcodeProduct.rawValue)
+            var stack = Stack<TargetNode>()
+            
+            for node in targetNode.dependencies where node is TargetNode {
+                stack.push(node as! TargetNode)
+            }
+            
+            var visited: Set<GraphNode> = .init()
+            var staticLibraries: [TargetNode] = [ ]
+            
+            while !stack.isEmpty {
+                
+                guard let node = stack.pop() else {
+                    continue
                 }
-                return DependencyReference.product("\(targetNode.target.name).\(`extension`)")
-        }))
-
+                
+                if visited.contains(node) {
+                    continue
+                }
+                
+                visited.insert(node)
+                
+                if node.target.product == .staticLibrary {
+                    staticLibraries.append(node)
+                }
+                
+                for child in node.dependencies where !visited.contains(child) && child is TargetNode {
+                    stack.push(child as! TargetNode)
+                }
+                
+            }
+            
+            references.append(contentsOf: staticLibraries.map{
+                DependencyReference.product($0.target.productName)
+            })
+            
+        }
+        
+        // Link dynamic libraries and frameworks
+        references.append(contentsOf: targetNode
+            .dependencies
+            .compactMap{ $0 as? TargetNode }
+            .filter{ $0.target.product == .framework || $0.target.product == .dynamicLibrary }
+            .map{ targetNode in
+                return DependencyReference.product(targetNode.target.productName)
+            })
+        
         return references
     }
 
@@ -176,15 +233,11 @@ class Graph: Graphing {
             .map({ DependencyReference.absolute($0.path) }))
 
         /// Other targets' frameworks.
-        try references.append(contentsOf: dependencies
+        references.append(contentsOf: dependencies
             .compactMap({ $0 as? TargetNode })
             .filter({ $0.target.product == .framework })
             .map({ targetNode in
-                let xcodeProduct = targetNode.target.product.xcodeValue
-                guard let `extension` = xcodeProduct.fileExtension else {
-                    throw GraphError.unsupportedFileExtension(xcodeProduct.rawValue)
-                }
-                return DependencyReference.product("\(targetNode.target.name).\(`extension`)")
+                return DependencyReference.product(targetNode.target.productName)
         }))
         return references
     }
@@ -199,5 +252,29 @@ class Graph: Graphing {
         }
         guard let targetNodes = cache.targetNodes[path] else { return nil }
         return targetNodes[name]
+    }
+}
+
+public struct Stack<T> {
+    fileprivate var array = [T]()
+    
+    public var isEmpty: Bool {
+        return array.isEmpty
+    }
+    
+    public var count: Int {
+        return array.count
+    }
+    
+    public mutating func push(_ element: T) {
+        array.append(element)
+    }
+    
+    public mutating func pop() -> T? {
+        return array.popLast()
+    }
+    
+    public var top: T? {
+        return array.last
     }
 }

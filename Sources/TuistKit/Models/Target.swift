@@ -117,7 +117,14 @@ class Target: GraphJSONInitiatable, Equatable {
     }
 
     var productName: String {
-        return "\(name).\(product.xcodeValue.fileExtension!)"
+        
+        switch product {
+        case .staticLibrary:
+            return "lib\(name).\(product.xcodeValue.fileExtension!)"
+        case _:
+            return "\(name).\(product.xcodeValue.fileExtension!)"
+        }
+        
     }
 
     // MARK: - Fileprivate
