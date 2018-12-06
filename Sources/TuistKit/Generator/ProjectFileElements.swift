@@ -54,7 +54,14 @@ class ProjectFileElements {
                             sourceRootPath: sourceRootPath)
 
         /// Dependencies
-        generate(dependencies: graph.dependencies(path: project.path),
+        
+        func alwaysTrue(graphNode: GraphNode) -> Bool {
+            return true
+        }
+        
+        let dependencies = graph.findAll(path: project.path, test: alwaysTrue)
+        
+        generate(dependencies: dependencies,
                  path: project.path,
                  groups: groups,
                  pbxproj: pbxproj,

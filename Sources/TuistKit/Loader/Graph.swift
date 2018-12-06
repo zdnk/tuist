@@ -37,6 +37,7 @@ enum DependencyReference: Equatable {
 }
 
 protocol Graphing: AnyObject {
+    
     var name: String { get }
     var entryPath: AbsolutePath { get }
     var entryNodes: [GraphNode] { get }
@@ -46,13 +47,18 @@ protocol Graphing: AnyObject {
     func linkableDependencies(path: AbsolutePath, name: String) throws -> [DependencyReference]
     func librariesPublicHeadersFolders(path: AbsolutePath, name: String) -> [AbsolutePath]
     func embeddableFrameworks(path: AbsolutePath, name: String, system: Systeming) throws -> [DependencyReference]
-    func dependencies(path: AbsolutePath, name: String) -> Set<GraphNode>
-    func dependencies(path: AbsolutePath) -> Set<GraphNode>
     func targetDependencies(path: AbsolutePath, name: String) -> [String]
     func staticLibraryDependencies(path: AbsolutePath, name: String) -> [DependencyReference]
+    
+    // MARK:- DFS
+    
+    func findAll<T: GraphNode>(path: AbsolutePath, test: (T) -> Bool) -> Set<T>
+    func findAll<T: GraphNode>(path: AbsolutePath, name: String, test: (T) -> Bool) -> Set<T>
+    
 }
 
 class Graph: Graphing {
+    
     // MARK: - Attributes
 
     private let cache: GraphLoaderCaching
@@ -78,134 +84,90 @@ class Graph: Graphing {
     // MARK: - Internal
 
     var frameworks: [FrameworkNode] {
-        return cache.precompiledNodes.values.compactMap({ $0 as? FrameworkNode })
+        return cache.precompiledNodes.values.compactMap{ $0 as? FrameworkNode }
     }
-
-    func dependencies(path: AbsolutePath) -> Set<GraphNode> {
-        var dependencies: Set<GraphNode> = Set()
-        cache.targetNodes[path]?.forEach {
-            dependencies.formUnion(self.dependencies(path: path, name: $0.key))
-        }
-        return dependencies
-    }
-
-    func dependencies(path: AbsolutePath, name: String) -> Set<GraphNode> {
-        var dependencies: Set<GraphNode> = Set()
-        var add: ((GraphNode) -> Void)!
-        add = { node in
-            guard let targetNode = node as? TargetNode else { return }
-            targetNode.dependencies.forEach({ dependencies.insert($0) })
-            targetNode.dependencies.compactMap({ $0 as? TargetNode }).forEach(add)
-        }
-        if let targetNode = self.targetNode(path: path, name: name) {
-            add(targetNode)
-        }
-        return dependencies
-    }
-
+    
     func targetDependencies(path: AbsolutePath, name: String) -> [String] {
-        guard let targetNode = self.targetNode(path: path, name: name) else { return [] }
-        return targetNode.dependencies
-            .compactMap({ $0 as? TargetNode })
-            .filter({ $0.path == path })
-            .map({ $0.target.name })
+        guard let targetNode = findTargetNode(path: path, name: name) else {
+            return [ ]
+        }
+        
+        return targetNode.targetDependencies
+            .filter{ $0.path == path }
+            .map(\.target.name)
     }
     
     func staticLibraryDependencies(path: AbsolutePath, name: String) -> [DependencyReference] {
         
-        guard let targetNode = self.targetNode(path: path, name: name) else {
+        guard let targetNode = findTargetNode(path: path, name: name) else {
             return [ ]
         }
 
-        return targetNode.dependencies
-            .compactMap{ $0 as? TargetNode }
-            .filter{ $0.target.product == .staticLibrary }
-            .map{ targetNode in
-                return DependencyReference.product(targetNode.target.productName)
-            }
-        
+        return targetNode.targetDependencies
+            .filter(isStaticLibrary(targetNode:))
+            .map(\.target.productName)
+            .map(DependencyReference.product)
     }
 
     func linkableDependencies(path: AbsolutePath, name: String) throws -> [DependencyReference] {
-        guard let targetNode = self.targetNode(path: path, name: name) else { return [] }
+        
+        guard let targetNode = findTargetNode(path: path, name: name) else {
+            return [ ]
+        }
 
-        var references: [DependencyReference] = []
+        var references: [DependencyReference] = [ ]
 
         /// Precompiled libraries and frameworks
-        references.append(contentsOf: targetNode
-            .dependencies
-            .compactMap({ $0 as? PrecompiledNode })
-            .map({ DependencyReference.absolute($0.path) }))
-        
+
+        let precompiledLibrariesAndFrameworks = targetNode.precompiledDependencies
+            .map(\.path)
+            .map(DependencyReference.absolute)
+
+        references.append(contentsOf: precompiledLibrariesAndFrameworks)
+
         switch targetNode.target.product {
         case .staticLibrary, .dynamicLibrary, .framework:
             // Ignore the products, they do not want to directly link the static libraries, the top level bundles will be responsible.
             break
         case .app, .unitTests, .uiTests:
-            
-            // Find all static libraries and add them to the references.
 
-            var stack = Stack<TargetNode>()
+            let staticLibraries = findAll(targetNode: targetNode, test: isStaticLibrary(targetNode:))
+                .lazy
+                .map(\.target.productName)
+                .map(DependencyReference.product)
             
-            for node in targetNode.dependencies where node is TargetNode {
-                stack.push(node as! TargetNode)
-            }
-            
-            var visited: Set<GraphNode> = .init()
-            var staticLibraries: [TargetNode] = [ ]
-            
-            while !stack.isEmpty {
-                
-                guard let node = stack.pop() else {
-                    continue
-                }
-                
-                if visited.contains(node) {
-                    continue
-                }
-                
-                visited.insert(node)
-                
-                if node.target.product == .staticLibrary {
-                    staticLibraries.append(node)
-                }
-                
-                for child in node.dependencies where !visited.contains(child) && child is TargetNode {
-                    stack.push(child as! TargetNode)
-                }
-                
-            }
-            
-            references.append(contentsOf: staticLibraries.map{
-                DependencyReference.product($0.target.productName)
-            })
-            
+            references.append(contentsOf: staticLibraries)
         }
-        
+
         // Link dynamic libraries and frameworks
-        references.append(contentsOf: targetNode
-            .dependencies
-            .compactMap{ $0 as? TargetNode }
-            .filter{ $0.target.product == .framework || $0.target.product == .dynamicLibrary }
-            .map{ targetNode in
-                return DependencyReference.product(targetNode.target.productName)
-            })
         
+        let dynamicLibrariesAndFrameworks = targetNode.targetDependencies
+            .filter(and(isFramework(targetNode:), isDynamicLibrary(targetNode:)))
+            .map(\.target.productName)
+            .map(DependencyReference.product)
+        
+        references.append(contentsOf: dynamicLibrariesAndFrameworks)
+
         return references
     }
 
     func librariesPublicHeadersFolders(path: AbsolutePath, name: String) -> [AbsolutePath] {
-        guard let targetNode = self.targetNode(path: path, name: name) else { return [] }
-        return targetNode
-            .dependencies
-            .compactMap({ $0 as? LibraryNode })
-            .map({ $0.publicHeaders })
+        
+        guard let targetNode = findTargetNode(path: path, name: name) else {
+            return [ ]
+        }
+        
+        return targetNode.libraryDependencies
+            .map(\.publicHeaders)
     }
 
     func embeddableFrameworks(path: AbsolutePath,
                               name: String,
                               system: Systeming) throws -> [DependencyReference] {
-        guard let targetNode = self.targetNode(path: path, name: name) else { return [] }
+        
+        guard let targetNode = findTargetNode(path: path, name: name) else {
+            return [ ]
+        }
 
         let validProducts: [Product] = [
             .app,
@@ -221,60 +183,165 @@ class Graph: Graphing {
 //            .messagesApplication,
         ]
 
-        if !validProducts.contains(targetNode.target.product) { return [] }
-
-        var references: [DependencyReference] = []
-        let dependencies = self.dependencies(path: path, name: name)
+        if validProducts.contains(targetNode.target.product) == false {
+            return [ ]
+        }
+ 
+        var references: [DependencyReference] = [ ]
 
         /// Precompiled frameworks
-        references.append(contentsOf: try dependencies
-            .compactMap({ $0 as? FrameworkNode })
-            .filter({ try $0.linking(system: system) == .dynamic })
-            .map({ DependencyReference.absolute($0.path) }))
+        let precompiledFrameworks = findAll(targetNode: targetNode, test: frameworkUsesDynamicLinking(system: system))
+            .lazy
+            .map(\.path)
+            .map(DependencyReference.absolute)
+
+        references.append(contentsOf: precompiledFrameworks)
 
         /// Other targets' frameworks.
-        references.append(contentsOf: dependencies
-            .compactMap({ $0 as? TargetNode })
-            .filter({ $0.target.product == .framework })
-            .map({ targetNode in
-                return DependencyReference.product(targetNode.target.productName)
-        }))
+        let otherTargetFrameworks = findAll(targetNode: targetNode, test: isFramework(targetNode:))
+            .lazy
+            .map(\.target.productName)
+            .map(DependencyReference.product)
+        
+        references.append(contentsOf: otherTargetFrameworks)
+        
         return references
     }
 
     // MARK: - Fileprivate
 
-    fileprivate func targetNode(path: AbsolutePath, name: String) -> TargetNode? {
-        if let targetNode = self.entryNodes.compactMap({ $0 as? TargetNode }).first(where: {
-            $0.path == path && $0.target.name == name
-        }) {
+    fileprivate func findTargetNode(path: AbsolutePath, name: String) -> TargetNode? {
+
+        func isPathAndNameEqual(node: TargetNode) -> Bool {
+            return node.path == path && node.target.name == name
+        }
+        
+        let targetNodes = entryNodes.compactMap{ $0 as? TargetNode }
+        
+        if let targetNode = targetNodes.first(where: isPathAndNameEqual) {
             return targetNode
         }
-        guard let targetNodes = cache.targetNodes[path] else { return nil }
-        return targetNodes[name]
+        
+        guard let cachedTargetNodesForPath = cache.targetNodes[path] else {
+            return nil
+        }
+        
+        return cachedTargetNodesForPath[name]
     }
 }
 
-public struct Stack<T> {
-    fileprivate var array = [T]()
+// MARK:- Predicates
+
+extension Graph {
     
-    public var isEmpty: Bool {
-        return array.isEmpty
+    internal func isStaticLibrary(targetNode: TargetNode) -> Bool {
+        return targetNode.target.product == .staticLibrary
+    }
+
+    internal func isDynamicLibrary(targetNode: TargetNode) -> Bool {
+        return targetNode.target.product == .dynamicLibrary
     }
     
-    public var count: Int {
-        return array.count
+    internal func isFramework(targetNode: TargetNode) -> Bool {
+        return targetNode.target.product == .framework
     }
     
-    public mutating func push(_ element: T) {
-        array.append(element)
+    internal func frameworkUsesDynamicLinking(system: Systeming) -> (_ frameworkNode: FrameworkNode) -> Bool {
+        return { frameworkNode in
+            return (try? frameworkNode.linking(system: system) == .dynamic) ?? false
+        }
     }
     
-    public mutating func pop() -> T? {
-        return array.popLast()
+}
+
+// MARK:- TargetNode helper computed properties, provide lazy arrays by default.
+
+extension TargetNode {
+    
+    fileprivate var targetDependencies: [TargetNode] {
+        return dependencies.lazy.compactMap{ $0 as? TargetNode }
     }
     
-    public var top: T? {
-        return array.last
+    fileprivate var precompiledDependencies: [PrecompiledNode] {
+        return dependencies.lazy.compactMap{ $0 as? PrecompiledNode }
+    }
+    
+    fileprivate var libraryDependencies: [LibraryNode] {
+        return dependencies.lazy.compactMap{ $0 as? LibraryNode }
+    }
+    
+    fileprivate var frameworkDependencies: [FrameworkNode] {
+        return dependencies.lazy.compactMap{ $0 as? FrameworkNode }
+    }
+    
+}
+
+extension Graph {
+    
+    // Traverse the graph for all cached target nodes using DFS and return all results passing the test.
+    internal func findAll<T: GraphNode>(path: AbsolutePath, test: (T) -> Bool) -> Set<T> {
+        
+        guard let targetNodes = cache.targetNodes[path] else {
+            return [ ]
+        }
+        
+        var references = Set<T>()
+        
+        for (_, node) in targetNodes {
+            references.formUnion(findAll(targetNode: node, test: test))
+        }
+        
+        return references
+        
+    }
+    
+    // Traverse the graph finding target node with name using DFS and return all results passing the test.
+    internal func findAll<T: GraphNode>(path: AbsolutePath, name: String, test: (T) -> Bool) -> Set<T> {
+        
+        guard let targetNode = findTargetNode(path: path, name: name) else {
+            return []
+        }
+
+        return findAll(targetNode: targetNode, test: test)
+    }
+
+    // Traverse the graph from the target node using DFS and return all results passing the test.
+    internal func findAll<T: GraphNode>(targetNode: TargetNode, test: (T) -> Bool) -> Set<T> {
+        var stack = Stack<GraphNode>()
+
+        for node in targetNode.dependencies where node is T {
+            stack.push(node as! T)
+        }
+
+        var visited: Set<GraphNode> = .init()
+        var references = Set<T>()
+
+        while !stack.isEmpty {
+            
+            guard let node = stack.pop() else {
+                continue
+            }
+
+            if visited.contains(node) {
+                continue
+            }
+
+            visited.insert(node)
+
+            if node is T, test(node as! T) {
+                references.insert(node as! T)
+            }
+            
+            if let targetNode = node as? TargetNode {
+             
+                for child in targetNode.dependencies where !visited.contains(child) {
+                    stack.push(child)
+                }
+                
+            }
+            
+        }
+
+        return references
     }
 }

@@ -89,11 +89,10 @@ final class LinkGenerator: LinkGenerating {
                                  pbxTarget: pbxTarget,
                                  pbxproj: pbxproj,
                                  fileElements: fileElements)
-        
+
         if target.product == .staticLibrary {
-            
             let dependencies = graph.staticLibraryDependencies(path: path, name: target.name)
-            
+
             try generateFakeSwiftDependenciesForStaticLibraries(
                 dependencies: dependencies,
                 pbxTarget: pbxTarget,
@@ -215,43 +214,38 @@ final class LinkGenerator: LinkGenerating {
             }
         }
     }
-    
-    func generateFakeSwiftDependenciesForStaticLibraries(
-        dependencies: [DependencyReference],
-        pbxTarget: PBXTarget,
-        pbxproj: PBXProj,
-        fileElements: ProjectFileElements
-    ) throws {
 
+    func generateFakeSwiftDependenciesForStaticLibraries(dependencies: [DependencyReference],
+                                                         pbxTarget: PBXTarget,
+                                                         pbxproj: PBXProj,
+                                                         fileElements: ProjectFileElements) throws {
         var files: [PBXBuildFile] = [ ]
-        
+
         for case let .product(name) in dependencies {
-            
             guard let fileRef = fileElements.product(name: name) else {
                 throw LinkGeneratorError.missingProduct(name: name)
             }
-            
+
             let buildFile = PBXBuildFile(file: fileRef)
             pbxproj.add(object: buildFile)
             files.append(buildFile)
         }
-        
+
+        // Nothing to link, move on.
         if files.count == 0 {
             return
         }
-        
+
         let buildPhase = PBXCopyFilesBuildPhase(
             dstPath: nil,
             dstSubfolderSpec: .productsDirectory,
-            name: "[tuist] Fake Swift Dependencies",
+            name: "Dependencies",
             buildActionMask: 8,
             files: files,
             runOnlyForDeploymentPostprocessing: true
         )
-        
+
         pbxproj.add(object: buildPhase)
         pbxTarget.buildPhases.append(buildPhase)
-        
     }
-    
 }
