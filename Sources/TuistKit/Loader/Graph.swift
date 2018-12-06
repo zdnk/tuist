@@ -88,6 +88,7 @@ class Graph: Graphing {
     }
     
     func targetDependencies(path: AbsolutePath, name: String) -> [String] {
+        
         guard let targetNode = findTargetNode(path: path, name: name) else {
             return [ ]
         }
@@ -248,7 +249,8 @@ extension Graph {
     
     internal func frameworkUsesDynamicLinking(system: Systeming) -> (_ frameworkNode: FrameworkNode) -> Bool {
         return { frameworkNode in
-            return (try? frameworkNode.linking(system: system) == .dynamic) ?? false
+            let isDynamicLink = try? frameworkNode.linking(system: system) == .dynamic
+            return isDynamicLink ?? false
         }
     }
     
@@ -307,6 +309,7 @@ extension Graph {
 
     // Traverse the graph from the target node using DFS and return all results passing the test.
     internal func findAll<T: GraphNode>(targetNode: TargetNode, test: (T) -> Bool) -> Set<T> {
+        
         var stack = Stack<GraphNode>()
 
         for node in targetNode.dependencies where node is T {
