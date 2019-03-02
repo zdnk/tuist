@@ -160,21 +160,8 @@ extension TuistKit.Settings {
         }
 
         let base: [String: String] = try json.get("base")
-//        let debugJSON: JSON? = try? json.get("debug")
-//        let debug = try debugJSON.flatMap { try Configuration.from(json: $0, path: path, fileHandler: fileHandler) }
-//        let releaseJSON: JSON? = try? json.get("release")
-//        let release = try releaseJSON.flatMap { try Configuration.from(json: $0, path: path, fileHandler: fileHandler) }
-//        let configurations = [
-//            BuildConfiguration.debug: debug,
-//            BuildConfiguration.release: release
-//        ]
         let configurations = try json.getArray("configurations").compactMap({ try TuistKit.Configuration.from(json: $0, path: path, fileHandler: fileHandler) })
         return Settings(base: base, configurations: Dictionary(uniqueKeysWithValues: configurations))
-
-//        return .init(x
-//            base: try json.get("base"),
-//            configurations: try json.getArray("configurations").compactMap({ try TuistKit.Configuration.from(json: $0, path: path, fileHandler: fileHandler) })
-//        )
     }
 }
 
@@ -189,12 +176,6 @@ extension TuistKit.Configuration {
         let buildConfiguration = BuildConfiguration(name: name, predefined: false, variant: variant)
         let configuration = Configuration(settings: settings, xcconfig: xcconfig)
         return (buildConfiguration, configuration)
-//        return .init(
-//            name: try json.get("name"),
-//            buildConfiguration: BuildConfiguration(rawValue: try json.get("buildConfiguration")) ?? .debug,
-//            settings: try json.get("settings"),
-//            xcconfig: json.get("xcconfig").flatMap({ path.appending(RelativePath($0)) })
-//        )
     }
 }
 
