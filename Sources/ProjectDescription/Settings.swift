@@ -39,14 +39,21 @@ public class Configuration: Codable {
 
 // MARK: - Settings
 
-public class Settings: Codable {
+public class Settings: Codable, EnvironmentReference {
     
     public let base: BuildSettings
     public let configurations: [Configuration]
+    public let identifier: Environment.Identifier?
 
     public init(base: BuildSettings = [:], configurations: [Configuration] = []) {
         self.base = base
         self.configurations = configurations
+        self.identifier = nil
     }
-    
+
+    init(_ identifier: String) {
+        self.base = [:]
+        self.configurations = []
+        self.identifier = identifier
+    }
 }

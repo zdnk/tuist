@@ -10,6 +10,9 @@ import Basic
 ///   - Whenever a dependency is encountered referencing another path,
 ///     this entity is consulted again to load the model at that path
 protocol GeneratorModelLoading {
+
+    var environmentPath: AbsolutePath? { get set }
+
     /// Load a Project model at the specified path
     ///
     /// - Parameter path: The absolute path for the project modal to load

@@ -26,6 +26,8 @@ final class GenerateCommandTests: XCTestCase {
         resourceLocator = ResourceLocator()
 
         subject = GenerateCommand(graphLoader: graphLoader,
+                                  modelLoader: GeneratorModelLoader(fileHandler: FileHandler(),
+                                                                    manifestLoader: GraphManifestLoader()), // hack;]
                                   workspaceGenerator: workspaceGenerator,
                                   parser: parser,
                                   printer: printer,

@@ -16,8 +16,10 @@ class GenerateCommand: NSObject, Command {
     fileprivate let printer: Printing
     fileprivate let system: Systeming
     fileprivate let resourceLocator: ResourceLocating
+    fileprivate var modelLoader: GeneratorModelLoading
 
     let pathArgument: OptionArgument<String>
+    let environmentPathArgument: OptionArgument<String>
 
     // MARK: - Init
 
@@ -25,8 +27,9 @@ class GenerateCommand: NSObject, Command {
         let system = System()
         let printer = Printer()
         let modelLoader = GeneratorModelLoader(fileHandler: FileHandler(),
-                                                    manifestLoader: GraphManifestLoader())
+                                               manifestLoader: GraphManifestLoader())
         self.init(graphLoader: GraphLoader(modelLoader: modelLoader),
+                  modelLoader: modelLoader,
                   workspaceGenerator: WorkspaceGenerator(),
                   parser: parser,
                   printer: printer,
@@ -35,6 +38,7 @@ class GenerateCommand: NSObject, Command {
     }
 
     init(graphLoader: GraphLoading,
+         modelLoader: GeneratorModelLoading,
          workspaceGenerator: WorkspaceGenerating,
          parser: ArgumentParser,
          printer: Printing,
@@ -42,6 +46,7 @@ class GenerateCommand: NSObject, Command {
          resourceLocator: ResourceLocating) {
         let subParser = parser.add(subparser: GenerateCommand.command, overview: GenerateCommand.overview)
         self.graphLoader = graphLoader
+        self.modelLoader = modelLoader
         self.workspaceGenerator = workspaceGenerator
         self.printer = printer
         self.system = system
@@ -51,9 +56,15 @@ class GenerateCommand: NSObject, Command {
                                      kind: String.self,
                                      usage: "The path where the project will be generated.",
                                      completion: .filename)
+        environmentPathArgument = subParser.add(option: "--environment",
+                                                shortName: "-e",
+                                                kind: String.self,
+                                                usage: "Path to the environment file.",
+                                                completion: .filename)
     }
 
     func run(with arguments: ArgumentParser.Result) throws {
+        modelLoader.environmentPath = arguments.get(environmentPathArgument).map { AbsolutePath($0) }
         let path = self.path(arguments: arguments)
         let graph = try graphLoader.load(path: path)
         try workspaceGenerator.generate(path: path,

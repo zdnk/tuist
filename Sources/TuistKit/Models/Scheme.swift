@@ -115,8 +115,8 @@ class TestAction: JSONMappable, Equatable {
     required init(json: JSON) throws {
         targets = try json.get("targets")
         arguments = try? json.get("arguments")
-        let configString: String = try json.get("config")
-        config = BuildConfiguration(rawValue: configString)!
+//        let configString: String = try json.get("config")
+        config = .debug // BuildConfiguration(rawValue: configString)!
         coverage = try json.get("coverage")
     }
 
@@ -148,8 +148,8 @@ class RunAction: JSONMappable, Equatable {
     }
 
     required init(json: JSON) throws {
-        let configString: String = try json.get("config")
-        config = BuildConfiguration(rawValue: configString)!
+//        let configString: String = try json.get("config")
+        config = .debug // BuildConfiguration(rawValue: configString)!
         executable = try? json.get("executable")
         arguments = try? json.get("arguments")
     }

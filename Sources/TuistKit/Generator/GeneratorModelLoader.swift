@@ -22,7 +22,9 @@ enum GeneratorModelLoaderError: Error, Equatable, FatalError {
 }
 
 class GeneratorModelLoader: GeneratorModelLoading {
-    
+
+    var environmentPath: AbsolutePath?
+
     private let fileHandler: FileHandling
     private let manifestLoader: GraphManifestLoading
     
@@ -32,20 +34,31 @@ class GeneratorModelLoader: GeneratorModelLoading {
     }
     
     func loadProject(at path: AbsolutePath) throws -> Project {
+        let environment = try loadEnvironment()
         let json = try manifestLoader.load(.project, path: path)
-        let project = try TuistKit.Project.from(json: json, path: path, fileHandler: fileHandler)
+        let project = try TuistKit.Project.from(json: json, path: path, fileHandler: fileHandler, environment: environment)
         return project
     }
     
     func loadWorkspace(at path: AbsolutePath) throws -> Workspace {
+        let environment = try loadEnvironment()
         let json = try manifestLoader.load(.workspace, path: path)
-        let workspace = try TuistKit.Workspace.from(json: json, path: path)
+        let workspace = try TuistKit.Workspace.from(json: json, path: path, environment: environment)
         return workspace
+    }
+
+    private func loadEnvironment() throws -> Environment? {
+        guard let environmentPath = environmentPath else {
+            return nil
+        }
+        let environmentJson = try manifestLoader.load(.environment, path: environmentPath)
+        let environment = try Environment.from(json: environmentJson, path: environmentPath, fileHandler: fileHandler)
+        return environment
     }
 }
 
 extension TuistKit.Workspace {
-    static func from(json: JSON, path: AbsolutePath) throws -> TuistKit.Workspace {
+    static func from(json: JSON, path: AbsolutePath, environment: Environment?) throws -> TuistKit.Workspace {
         let projectsStrings: [String] = try json.get("projects")
         let name: String = try json.get("name")
         let projectsRelativePaths: [RelativePath] = projectsStrings.map { RelativePath($0) }
@@ -55,22 +68,22 @@ extension TuistKit.Workspace {
 }
 
 extension TuistKit.Project {
-    static func from(json: JSON, path: AbsolutePath, fileHandler: FileHandling) throws -> TuistKit.Project {
+    static func from(json: JSON, path: AbsolutePath, fileHandler: FileHandling, environment: Environment?) throws -> TuistKit.Project {
         let name: String = try json.get("name")
         let targetsJSONs: [JSON] = try json.get("targets")
-        let targets = try targetsJSONs.map { try TuistKit.Target.from(json: $0, path: path, fileHandler: fileHandler) }
+        let targets = try targetsJSONs.map { try TuistKit.Target.from(json: $0, path: path, fileHandler: fileHandler, environment: environment) }
         let settingsJSON: JSON? = try? json.get("settings")
-        let settings = try settingsJSON.map { try TuistKit.Settings.from(json: $0, path: path, fileHandler: fileHandler) }
+        let settings = try settingsJSON.map { try TuistKit.Settings.from(json: $0, path: path, fileHandler: fileHandler, environment: environment) }
         
         return Project(path: path,
                        name: name,
-                       settings: settings,
+                       settings: settings ?? Settings.default,
                        targets: targets)
     }
 }
 
 extension TuistKit.Target {
-    static func from(json: JSON, path: AbsolutePath, fileHandler: FileHandling) throws -> TuistKit.Target {
+    static func from(json: JSON, path: AbsolutePath, fileHandler: FileHandling, environment: Environment?) throws -> TuistKit.Target {
         let name: String = try json.get("name")
         let platformString: String = try json.get("platform")
         guard let platform = TuistKit.Platform(rawValue: platformString) else {
@@ -94,7 +107,7 @@ extension TuistKit.Target {
         
         // Settings
         let settingsDictionary: [String: JSONSerializable]? = try? json.get("settings")
-        let settings = try settingsDictionary.map { try TuistKit.Settings.from(json: JSON($0), path: path, fileHandler: fileHandler) }
+        let settings = try settingsDictionary.map { try TuistKit.Settings.from(json: JSON($0), path: path, fileHandler: fileHandler, environment: environment) }
         
         // Sources
         let sourcesString: String = try json.get("sources")
@@ -138,22 +151,50 @@ extension TuistKit.Target {
 }
 
 extension TuistKit.Settings {
-    static func from(json: JSON, path: AbsolutePath, fileHandler: FileHandling) throws -> TuistKit.Settings {
-        return .init(
-            base: try json.get("base"),
-            configurations: try json.getArray("configurations").compactMap({ try TuistKit.Configuration.from(json: $0, path: path, fileHandler: fileHandler) })
-        )
+    static func from(json: JSON, path: AbsolutePath, fileHandler: FileHandling, environment: Environment?) throws -> TuistKit.Settings {
+        if let identifier = json.getIdentifier() {
+            guard let environment = environment else {
+                throw GeneratorModelLoaderError.malformedManifest("Used Environment.settings '\(identifier)' but Environment not found")
+            }
+            return try environment.lookupSettings(identifier: identifier)
+        }
+
+        let base: [String: String] = try json.get("base")
+//        let debugJSON: JSON? = try? json.get("debug")
+//        let debug = try debugJSON.flatMap { try Configuration.from(json: $0, path: path, fileHandler: fileHandler) }
+//        let releaseJSON: JSON? = try? json.get("release")
+//        let release = try releaseJSON.flatMap { try Configuration.from(json: $0, path: path, fileHandler: fileHandler) }
+//        let configurations = [
+//            BuildConfiguration.debug: debug,
+//            BuildConfiguration.release: release
+//        ]
+        let configurations = try json.getArray("configurations").compactMap({ try TuistKit.Configuration.from(json: $0, path: path, fileHandler: fileHandler) })
+        return Settings(base: base, configurations: Dictionary(uniqueKeysWithValues: configurations))
+
+//        return .init(x
+//            base: try json.get("base"),
+//            configurations: try json.getArray("configurations").compactMap({ try TuistKit.Configuration.from(json: $0, path: path, fileHandler: fileHandler) })
+//        )
     }
 }
 
 extension TuistKit.Configuration {
-    static func from(json: JSON, path: AbsolutePath, fileHandler: FileHandling) throws -> TuistKit.Configuration {
-        return .init(
-            name: try json.get("name"),
-            buildConfiguration: BuildConfiguration(rawValue: try json.get("buildConfiguration")) ?? .debug,
-            settings: try json.get("settings"),
-            xcconfig: json.get("xcconfig").flatMap({ path.appending(RelativePath($0)) })
-        )
+    static func from(json: JSON, path: AbsolutePath, fileHandler: FileHandling) throws -> (TuistKit.BuildConfiguration, TuistKit.Configuration) {
+        let name: String = try json.get("name")
+        let buildConfigurationString: String = try json.get("buildConfiguration")
+        let settings: [String: String] = try json.get("settings")
+        let xcconfigString: String? = json.get("xcconfig")
+        let xcconfig = xcconfigString.flatMap { path.appending(RelativePath($0)) }
+        let variant: BuildConfiguration.Variant = buildConfigurationString == "release" ? .release : .debug
+        let buildConfiguration = BuildConfiguration(name: name, predefined: false, variant: variant)
+        let configuration = Configuration(settings: settings, xcconfig: xcconfig)
+        return (buildConfiguration, configuration)
+//        return .init(
+//            name: try json.get("name"),
+//            buildConfiguration: BuildConfiguration(rawValue: try json.get("buildConfiguration")) ?? .debug,
+//            settings: try json.get("settings"),
+//            xcconfig: json.get("xcconfig").flatMap({ path.appending(RelativePath($0)) })
+//        )
     }
 }
 
@@ -231,5 +272,32 @@ extension JSON {
         }
         return try Dictionary(items: value.map({ ($0.0, try T.init(json: $0.1)) }))
     }
-    
+
+    fileprivate func getIdentifier() -> String? {
+        return get("identifier")
+    }
+}
+
+// MARK: - Environment
+
+class Environment {
+
+    let settings: [String: Settings]
+
+    private init(settings: [String: Settings]) {
+        self.settings = settings
+    }
+
+    func lookupSettings(identifier: String) throws -> Settings {
+        guard let settings = self.settings[identifier] else {
+            throw GeneratorModelLoaderError.malformedManifest("Unrecognized Environment.settings identifier '\(identifier)'")
+        }
+        return settings
+    }
+
+    static func from(json: JSON, path: AbsolutePath, fileHandler: FileHandling) throws -> Environment {
+        let identifierToJson: [String: JSON] = try json.get("settings")
+        let settings = try identifierToJson.mapValues { try TuistKit.Settings.from(json: $0, path: path, fileHandler: fileHandler, environment: nil) }
+        return Environment(settings: settings)
+    }
 }

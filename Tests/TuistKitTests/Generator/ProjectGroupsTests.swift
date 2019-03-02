@@ -18,7 +18,7 @@ final class ProjectGroupsTests: XCTestCase {
         sourceRootPath = AbsolutePath("/test/")
         project = Project(path: path,
                           name: "Project",
-                          settings: nil,
+                          settings: Settings.default,
                           targets: [])
         pbxproj = PBXProj()
     }

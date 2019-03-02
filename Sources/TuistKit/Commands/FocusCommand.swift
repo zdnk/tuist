@@ -47,7 +47,7 @@ class FocusCommand: NSObject, Command {
     required convenience init(parser: ArgumentParser) {
         let fileHandler = FileHandler()
         let modelLoader = GeneratorModelLoader(fileHandler: fileHandler,
-                                                    manifestLoader: GraphManifestLoader())
+                                               manifestLoader: GraphManifestLoader())
         self.init(parser: parser,
                   graphLoader: GraphLoader(modelLoader: modelLoader),
                   workspaceGenerator: WorkspaceGenerator(),

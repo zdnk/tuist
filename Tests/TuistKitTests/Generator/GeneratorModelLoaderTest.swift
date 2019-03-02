@@ -115,10 +115,10 @@ class GeneratorModelLoaderTest: XCTestCase {
         // Given
         let debug = ConfigurationManifest(name: "Debug", settings: ["Debug": "Debug"], xcconfig: "debug.xcconfig", buildConfiguration: .debug)
         let release = ConfigurationManifest(name: "Release", settings: ["Release": "Release"], xcconfig: "release.xcconfig", buildConfiguration: .release)
-        let manifest = SettingsManifest(base: ["base": "base"], configurations: [ debug, release ])
+        let manifest = SettingsManifest(base: ["base": "base"], configurations: [debug, release])
         
         // When
-        let model = try TuistKit.Settings.from(json: manifest.toJSON(), path: path, fileHandler: fileHandler)
+        let model = try TuistKit.Settings.from(json: manifest.toJSON(), path: path, fileHandler: fileHandler, environment: nil)
         
         // Then
         assert(settings: model, matches: manifest, at: path)
@@ -196,7 +196,7 @@ class GeneratorModelLoaderTest: XCTestCase {
         ]
         // When / Then
         XCTAssertThrowsError(
-            try TuistKit.Target.from(json: malformedManifest.toJSON(), path: path, fileHandler: fileHandler)
+            try TuistKit.Target.from(json: malformedManifest.toJSON(), path: path, fileHandler: fileHandler, environment: nil)
         ) { error in
             XCTAssertEqual(error as? GeneratorModelLoaderError,
                            GeneratorModelLoaderError.malformedManifest("unrecognized product '<invalid>'"))
@@ -213,7 +213,7 @@ class GeneratorModelLoaderTest: XCTestCase {
         
         // When / Then
         XCTAssertThrowsError(
-            try TuistKit.Target.from(json: malformedManifest.toJSON(), path: path, fileHandler: fileHandler)
+            try TuistKit.Target.from(json: malformedManifest.toJSON(), path: path, fileHandler: fileHandler, environment: nil)
         ) { error in
             XCTAssertEqual(error as? GeneratorModelLoaderError,
                            GeneratorModelLoaderError.malformedManifest("unrecognized platform '<invalid>'"))
@@ -279,22 +279,23 @@ class GeneratorModelLoaderTest: XCTestCase {
                 file: StaticString = #file,
                 line: UInt = #line) {
         XCTAssertEqual(settings.base, manifest.base, file: file, line: line)
-        
-        for (configuration, manifestConfiguration) in zip(settings.configurations, manifest.configurations) {
+
+        let sortedConfigurations = settings.configurations.sorted { (l, r) -> Bool in l.key.name < r.key.name }
+        let sortedManifsetConfigurations = manifest.configurations.sorted { (l, r) -> Bool in l.name < r.name }
+        for (configuration, manifestConfiguration) in zip(sortedConfigurations, sortedManifsetConfigurations) {
             assert(configuration: configuration, matches: manifestConfiguration, at: path, file: file, line: line)
         }
-
     }
     
-    func assert(configuration: TuistKit.Configuration,
+    func assert(configuration: (TuistKit.BuildConfiguration, TuistKit.Configuration?),
                 matches manifest: ProjectDescription.Configuration,
                 at path: AbsolutePath,
                 file: StaticString = #file,
                 line: UInt = #line) {
-        XCTAssertEqual(configuration.name, manifest.name)
-        XCTAssertEqual(configuration.buildConfiguration.rawValue, manifest.buildConfiguration.rawValue)
-        XCTAssertEqual(configuration.settings, manifest.settings, file: file, line: line)
-        XCTAssertEqual(configuration.xcconfig, manifest.xcconfig.map { path.appending(RelativePath($0)) }, file: file, line: line)
+        XCTAssertEqual(configuration.0.name, manifest.name)
+        XCTAssertEqual(configuration.0.variant.rawValue, manifest.buildConfiguration.rawValue)
+        XCTAssertEqual(configuration.1?.settings, manifest.settings, file: file, line: line)
+        XCTAssertEqual(configuration.1?.xcconfig, manifest.xcconfig.map { path.appending(RelativePath($0)) }, file: file, line: line)
     }
     
     func assert(coreDataModels: [TuistKit.CoreDataModel],

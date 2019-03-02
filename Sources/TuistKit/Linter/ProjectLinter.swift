@@ -29,10 +29,7 @@ class ProjectLinter: ProjectLinting {
         var issues: [LintingIssue] = []
         
         issues.append(contentsOf: lintTargets(project: project))
-        
-        if let settings = project.settings {
-            issues.append(contentsOf: settingsLinter.lint(settings: settings))
-        }
+        issues.append(contentsOf: settingsLinter.lint(settings: project.settings))
         
         return issues
     }

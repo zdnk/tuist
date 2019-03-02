@@ -2,53 +2,56 @@ import Basic
 import Foundation
 import TuistCore
 
-typealias BuildSettings = [String: String]
-
-class Configuration: Equatable {
-    
-    typealias Name = String
+public class Configuration: Equatable {
     // MARK: - Attributes
-
-    let name: String
-    let buildConfiguration: BuildConfiguration
-    let settings: BuildSettings
-    let xcconfig: AbsolutePath?
+    public let settings: [String: String]
+    public let xcconfig: AbsolutePath?
 
     // MARK: - Init
-
-    init(name: String, buildConfiguration: BuildConfiguration, settings: BuildSettings = [:], xcconfig: AbsolutePath? = nil) {
-        self.name = name
-        self.buildConfiguration = buildConfiguration
+    public init(settings: [String: String] = [:], xcconfig: AbsolutePath? = nil) {
         self.settings = settings
         self.xcconfig = xcconfig
     }
 
     // MARK: - Equatable
-
-    static func == (lhs: Configuration, rhs: Configuration) -> Bool {
-        return lhs.name == rhs.name &&
-            lhs.buildConfiguration == rhs.buildConfiguration &&
-            lhs.settings == rhs.settings &&
-            lhs.xcconfig == rhs.xcconfig
+    public static func == (lhs: Configuration, rhs: Configuration) -> Bool {
+        return lhs.settings == rhs.settings && lhs.xcconfig == rhs.xcconfig
     }
 }
 
-class Settings: Equatable {
-    // MARK: - Attributes
+public class Settings: Equatable {
 
-    let base: BuildSettings
-    let configurations: [Configuration]
+    public static let `default` = Settings(configurations: [.release: nil, .debug: nil])
+
+    // MARK: - Attributes
+    public let base: [String: String]
+    public let configurations: [BuildConfiguration: Configuration?]
 
     // MARK: - Init
-
-    init(base: BuildSettings = [:], configurations: [Configuration]) {
+    public init(base: [String: String] = [:],
+                configurations: [BuildConfiguration: Configuration?]) {
         self.base = base
         self.configurations = configurations
     }
-    
-    // MARK: - Equatable
 
-    static func == (lhs: Settings, rhs: Settings) -> Bool {
+    // MARK: - Internal
+    static func ordered(configurations: [BuildConfiguration: Configuration?])
+        -> [(key: BuildConfiguration, value: Configuration?)] {
+            return configurations.sorted(by: { first, second -> Bool in
+                return first.key.name < second.key.name
+            })
+    }
+
+    func orderedConfigurations() -> [(key: BuildConfiguration, value: Configuration?)] {
+        return Settings.ordered(configurations: configurations)
+    }
+
+    func xcconfigs() -> [AbsolutePath] {
+        return configurations.values.compactMap { $0?.xcconfig }
+    }
+
+    // MARK: - Equatable
+    public static func == (lhs: Settings, rhs: Settings) -> Bool {
         return lhs.base == rhs.base && lhs.configurations == rhs.configurations
     }
 }

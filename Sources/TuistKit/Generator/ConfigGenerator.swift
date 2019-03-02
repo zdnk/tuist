@@ -4,32 +4,22 @@ import TuistCore
 import xcodeproj
 
 protocol ConfigGenerating: AnyObject {
-    
-    func generateProjectConfig(
-        project: Project,
-        pbxproj: PBXProj,
-        fileElements: ProjectFileElements,
-        configurations: ConfigurationList,
-        isRoot: Bool,
-        options: GenerationOptions
-    ) throws -> XCConfigurationList
-    
-    func generateManifestsConfig(
-        pbxproj: PBXProj,
-        options: GenerationOptions,
-        resourceLocator: ResourceLocating,
-        configurations: ConfigurationList
-    ) throws -> XCConfigurationList
+    func generateProjectConfig(project: Project,
+                               pbxproj: PBXProj,
+                               fileElements: ProjectFileElements,
+                               options: GenerationOptions) throws -> XCConfigurationList
 
-    func generateTargetConfig(
-        _ target: Target,
-        pbxTarget: PBXTarget,
-        pbxproj: PBXProj,
-        fileElements: ProjectFileElements,
-        configurations: ConfigurationList,
-        options: GenerationOptions,
-        sourceRootPath: AbsolutePath
-    ) throws
+    func generateManifestsConfig(pbxproj: PBXProj,
+                                 options: GenerationOptions,
+                                 resourceLocator: ResourceLocating) throws -> XCConfigurationList
+
+    func generateTargetConfig(_ target: Target,
+                              pbxTarget: PBXTarget,
+                              pbxproj: PBXProj,
+                              projectSettings: Settings,
+                              fileElements: ProjectFileElements,
+                              options: GenerationOptions,
+                              sourceRootPath: AbsolutePath) throws
 }
 
 final class ConfigGenerator: ConfigGenerating {
@@ -43,75 +33,67 @@ final class ConfigGenerator: ConfigGenerating {
         self.fileGenerator = fileGenerator
     }
 
-    func generateProjectConfig(
-        project: Project,
-        pbxproj: PBXProj,
-        fileElements: ProjectFileElements,
-        configurations: ConfigurationList,
-        isRoot: Bool,
-        options _: GenerationOptions
-    ) throws -> XCConfigurationList {
+    // MARK: - ConfigGenerating
+
+    func generateProjectConfig(project: Project,
+                               pbxproj: PBXProj,
+                               fileElements: ProjectFileElements,
+                               options _: GenerationOptions) throws -> XCConfigurationList {
         /// Configuration list
-        let configurationList = XCConfigurationList(buildConfigurations: [ ])
-        
+        let configurationList = XCConfigurationList(buildConfigurations: [])
         pbxproj.add(object: configurationList)
-        
-        for configuration in configurations {
-            
-            try generateProjectSettingsFor(
-                buildConfiguration: configuration.buildConfiguration,
-                configuration: configuration,
-                project: project,
-                fileElements: fileElements,
-                pbxproj: pbxproj,
-                configurationList: configurationList,
-                isRoot: isRoot
-            )
-            
+
+        try project.settings.orderedConfigurations().forEach {
+            try generateProjectSettingsFor(buildConfiguration: $0.key,
+                                           configuration: $0.value,
+                                           project: project,
+                                           fileElements: fileElements,
+                                           pbxproj: pbxproj,
+                                           configurationList: configurationList)
         }
 
         return configurationList
     }
 
-    func generateTargetConfig(
-        _ target: Target,
-        pbxTarget: PBXTarget,
-        pbxproj: PBXProj,
-        fileElements: ProjectFileElements,
-        configurations: ConfigurationList,
-        options _: GenerationOptions,
-        sourceRootPath: AbsolutePath
-    ) throws {
-        
-        let configurationList = XCConfigurationList(buildConfigurations: [ ])
-        
+    func generateTargetConfig(_ target: Target,
+                              pbxTarget: PBXTarget,
+                              pbxproj: PBXProj,
+                              projectSettings: Settings,
+                              fileElements: ProjectFileElements,
+                              options _: GenerationOptions,
+                              sourceRootPath: AbsolutePath) throws {
+        let configurationList = XCConfigurationList(buildConfigurations: [])
         pbxproj.add(object: configurationList)
         pbxTarget.buildConfigurationList = configurationList
-        
-        for configuration in configurations {
-            
-            try generateTargetSettingsFor(
-                target: target,
-                buildConfiguration: configuration.buildConfiguration,
-                configuration: configuration,
-                fileElements: fileElements,
-                pbxproj: pbxproj,
-                configurationList: configurationList,
-                sourceRootPath: sourceRootPath
-            )
-            
-        }
 
+        let projectBuildConfigurations = projectSettings.configurations.keys
+        let targetConfigurations = target.settings?.configurations ?? [:]
+        let targetBuildConfigurations = targetConfigurations.keys
+        let buildConfigurations = Set(projectBuildConfigurations).union(targetBuildConfigurations)
+        let configurationsTuples: [(BuildConfiguration, Configuration?)] = buildConfigurations.map {
+            if let configuration = target.settings?.configurations[$0] {
+                return ($0, configuration)
+            }
+            return ($0, nil)
+        }
+        let configurations = Dictionary(uniqueKeysWithValues: configurationsTuples)
+        let nonEmptyConfigurations = !configurations.isEmpty ? configurations : Settings.default.configurations
+        let orderedConfigurations = Settings.ordered(configurations: nonEmptyConfigurations)
+        try orderedConfigurations.forEach {
+            try generateTargetSettingsFor(target: target,
+                                          buildConfiguration: $0.key,
+                                          configuration: $0.value,
+                                          fileElements: fileElements,
+                                          pbxproj: pbxproj,
+                                          configurationList: configurationList,
+                                          sourceRootPath: sourceRootPath)
+        }
     }
 
-    func generateManifestsConfig(
-        pbxproj: PBXProj,
-        options _: GenerationOptions,
-        resourceLocator: ResourceLocating = ResourceLocator(),
-        configurations: ConfigurationList
-    ) throws -> XCConfigurationList {
-        
-        let configurationList = XCConfigurationList(buildConfigurations: [ ])
+    func generateManifestsConfig(pbxproj: PBXProj,
+                                 options _: GenerationOptions,
+                                 resourceLocator: ResourceLocating = ResourceLocator()) throws -> XCConfigurationList {
+        let configurationList = XCConfigurationList(buildConfigurations: [])
         pbxproj.add(object: configurationList)
 
         let addSettings: (XCBuildConfiguration) throws -> Void = { configuration in
@@ -126,115 +108,79 @@ final class ConfigGenerator: ConfigGenerating {
             configuration.buildSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "SWIFT_PACKAGE"
             configuration.buildSettings["OTHER_SWIFT_FLAGS"] = "-swift-version 4 -I \(frameworkParentDirectory.asString)"
         }
-        
-        for configuration in configurations {
-            
-            let variant: BuildSettingsProvider.Variant = (configuration.buildConfiguration == .debug) ? .debug : .release
-            
-            // Debug configuration
-            let debugConfig = XCBuildConfiguration(name: configuration.name, baseConfiguration: nil, buildSettings: [:])
-            pbxproj.add(object: debugConfig)
-            
-            debugConfig.buildSettings = BuildSettingsProvider.targetDefault(
-                variant: variant,
-                platform: .macOS,
-                product: .framework,
-                swift: true
-            )
-            
-            configurationList.buildConfigurations.append(debugConfig)
-            try addSettings(debugConfig)
-            
-        }
+
+        // Debug configuration
+        let debugConfig = XCBuildConfiguration(name: "Debug", baseConfiguration: nil, buildSettings: [:])
+        pbxproj.add(object: debugConfig)
+        debugConfig.buildSettings = BuildSettingsProvider.targetDefault(variant: .debug, platform: .macOS, product: .framework, swift: true)
+        configurationList.buildConfigurations.append(debugConfig)
+        try addSettings(debugConfig)
+
+        // Release configuration
+        let releaseConfig = XCBuildConfiguration(name: "Release", baseConfiguration: nil, buildSettings: [:])
+        pbxproj.add(object: releaseConfig)
+        releaseConfig.buildSettings = BuildSettingsProvider.targetDefault(variant: .release, platform: .macOS, product: .framework, swift: true)
+        configurationList.buildConfigurations.append(releaseConfig)
+        try addSettings(releaseConfig)
 
         return configurationList
     }
 
     // MARK: - Fileprivate
 
-    fileprivate func generateProjectSettingsFor(
-        buildConfiguration: BuildConfiguration,
-        configuration: Configuration,
-        project: Project,
-        fileElements: ProjectFileElements,
-        pbxproj: PBXProj,
-        configurationList: XCConfigurationList,
-        isRoot: Bool
-    ) throws {
-        
-        let variant: BuildSettingsProvider.Variant = (buildConfiguration == .debug) ? .debug : .release
+    fileprivate func generateProjectSettingsFor(buildConfiguration: BuildConfiguration,
+                                                configuration: Configuration?,
+                                                project: Project,
+                                                fileElements: ProjectFileElements,
+                                                pbxproj: PBXProj,
+                                                configurationList: XCConfigurationList) throws {
+        let variant: BuildSettingsProvider.Variant = settingsProviderVariant(buildConfiguration.variant)
         let defaultConfigSettings = BuildSettingsProvider.projectDefault(variant: variant)
         let defaultSettingsAll = BuildSettingsProvider.projectDefault(variant: .all)
-        let variantBuildConfiguration = XCBuildConfiguration(name: configuration.name, baseConfiguration: nil, buildSettings: [:])
 
         var settings: [String: Any] = [:]
         extend(buildSettings: &settings, with: defaultSettingsAll)
-        extend(buildSettings: &settings, with: project.settings?.base ?? [:])
+        extend(buildSettings: &settings, with: project.settings.base)
         extend(buildSettings: &settings, with: defaultConfigSettings)
-        
-        let projectBuildSettings: BuildSettings
-        let xcconfig: AbsolutePath?
-        
-        if isRoot {
-            projectBuildSettings = configuration.settings
-            xcconfig = configuration.xcconfig
-        } else {
-            
-            /// If any configurations in the project match the root project configuration name, then merge the settings
-            /// else, If any build configuration types (debug, release) match then select the first one. This is because
-            /// a dependency might only specify Debug and Release where the root project would specify Debug, UAT and Release.
-            
-            let projectConfigurations = project.settings?.configurations
-            let projectConfiguration = projectConfigurations?.first(where: { $0.name == configuration.name }) ?? projectConfigurations?.first(where: { $0.buildConfiguration == buildConfiguration })
-            
-            projectBuildSettings = projectConfiguration?.settings ?? [:]
-            xcconfig = projectConfiguration?.xcconfig
-            
+
+        let variantBuildConfiguration = XCBuildConfiguration(name: buildConfiguration.name, baseConfiguration: nil, buildSettings: [:])
+        if let variantConfig = configuration {
+            extend(buildSettings: &settings, with: variantConfig.settings)
+            if let xcconfig = variantConfig.xcconfig {
+                let fileReference = fileElements.file(path: xcconfig)
+                variantBuildConfiguration.baseConfiguration = fileReference
+            }
         }
-        
-        extend(buildSettings: &settings, with: projectBuildSettings)
-        
-        variantBuildConfiguration.baseConfiguration = xcconfig.flatMap(fileElements.file)
         variantBuildConfiguration.buildSettings = settings
-        
         pbxproj.add(object: variantBuildConfiguration)
         configurationList.buildConfigurations.append(variantBuildConfiguration)
     }
 
-    fileprivate func generateTargetSettingsFor(
-        target: Target,
-        buildConfiguration: BuildConfiguration,
-        configuration: Configuration,
-        fileElements: ProjectFileElements,
-        pbxproj: PBXProj,
-        configurationList: XCConfigurationList,
-        sourceRootPath: AbsolutePath
-    ) throws {
-        
+    fileprivate func generateTargetSettingsFor(target: Target,
+                                               buildConfiguration: BuildConfiguration,
+                                               configuration: Configuration?,
+                                               fileElements: ProjectFileElements,
+                                               pbxproj: PBXProj,
+                                               configurationList: XCConfigurationList,
+                                               sourceRootPath: AbsolutePath) throws {
         let product = settingsProviderProduct(target)
         let platform = settingsProviderPlatform(target)
 
         let defaultConfigSettings = BuildSettingsProvider.targetDefault(platform: platform, product: product)
 
         var settings: [String: Any] = [:]
-        
         extend(buildSettings: &settings, with: defaultConfigSettings)
         extend(buildSettings: &settings, with: target.settings?.base ?? [:])
+        extend(buildSettings: &settings, with: configuration?.settings ?? [:])
 
-        /// If any configurations in the project match the root project configuration name, then merge the settings
-        /// else, If any of the default build configuration types (Debug, Release) match then assign using that.
-        
-        let targetConfigurations = target.settings?.configurations
-        let targetConfiguration = targetConfigurations?.first(where: { $0.name == configuration.name }) ?? targetConfigurations?.first(where: { $0.buildConfiguration == buildConfiguration })
-        
-        extend(buildSettings: &settings, with: targetConfiguration?.settings ?? [:])
-        
-        let variantBuildConfiguration = XCBuildConfiguration(name: configuration.name, baseConfiguration: nil, buildSettings: [:])
-
-        if let variantConfig = targetConfiguration {
-            variantBuildConfiguration.baseConfiguration = variantConfig.xcconfig.flatMap(fileElements.file)
+        let variantBuildConfiguration = XCBuildConfiguration(name: buildConfiguration.name, baseConfiguration: nil, buildSettings: [:])
+        if let variantConfig = configuration {
+            if let xcconfig = variantConfig.xcconfig {
+                let fileReference = fileElements.file(path: xcconfig)
+                variantBuildConfiguration.baseConfiguration = fileReference
+            }
         }
-        
+
         /// Target attributes
         settings["PRODUCT_BUNDLE_IDENTIFIER"] = target.bundleId
         settings["INFOPLIST_FILE"] = "$(SRCROOT)/\(target.infoPlist.relative(to: sourceRootPath).asString)"
@@ -247,7 +193,7 @@ final class ConfigGenerator: ConfigGenerating {
         if settings["SWIFT_VERSION"] == nil {
             settings["SWIFT_VERSION"] = Constants.swiftVersion
         }
-        
+
         if target.product == .staticFramework {
             settings["MACH_O_TYPE"] = "staticlib"
         }
@@ -255,6 +201,14 @@ final class ConfigGenerator: ConfigGenerating {
         variantBuildConfiguration.buildSettings = settings
         pbxproj.add(object: variantBuildConfiguration)
         configurationList.buildConfigurations.append(variantBuildConfiguration)
+    }
+
+    fileprivate func settingsProviderVariant(_ variant: BuildConfiguration.Variant) -> BuildSettingsProvider.Variant {
+        switch variant {
+        case .debug: return .debug
+        case .release: return .release
+        case .all: return .all
+        }
     }
 
     fileprivate func settingsProviderPlatform(_ target: Target) -> BuildSettingsProvider.Platform? {

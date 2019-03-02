@@ -56,6 +56,7 @@ enum Manifest: CaseIterable {
     case project
     case workspace
     case setup
+    case environment
 
     var fileName: String {
         switch self {
@@ -65,6 +66,8 @@ enum Manifest: CaseIterable {
             return "Workspace.swift"
         case .setup:
             return "Setup.swift"
+        case .environment:
+            return "Environment.swift"
         }
     }
 

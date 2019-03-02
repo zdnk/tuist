@@ -10,12 +10,12 @@ protocol TargetGenerating: AnyObject {
                                  groups: ProjectGroups,
                                  sourceRootPath: AbsolutePath,
                                  options: GenerationOptions,
-                                 resourceLocator: ResourceLocating,
-                                 configurations: ConfigurationList) throws
+                                 resourceLocator: ResourceLocating) throws
 
     func generateTarget(target: Target,
                         pbxproj: PBXProj,
                         pbxProject: PBXProject,
+                        projectSettings: Settings,
                         groups _: ProjectGroups,
                         fileElements: ProjectFileElements,
                         path: AbsolutePath,
@@ -23,8 +23,7 @@ protocol TargetGenerating: AnyObject {
                         options: GenerationOptions,
                         graph: Graphing,
                         resourceLocator: ResourceLocating,
-                        system: Systeming,
-                        configurations: ConfigurationList) throws -> PBXNativeTarget
+                        system: Systeming) throws -> PBXNativeTarget
 
     func generateTargetDependencies(path: AbsolutePath,
                                     targets: [Target],
@@ -63,8 +62,7 @@ final class TargetGenerator: TargetGenerating {
                                  groups: ProjectGroups,
                                  sourceRootPath: AbsolutePath,
                                  options: GenerationOptions,
-                                 resourceLocator: ResourceLocating = ResourceLocator(),
-                                 configurations: ConfigurationList) throws {
+                                 resourceLocator: ResourceLocating = ResourceLocator()) throws {
         /// Names
         let name = "\(project.name)-Manifest"
         let frameworkName = "\(name).framework"
@@ -85,8 +83,7 @@ final class TargetGenerator: TargetGenerating {
         // Configuration
         let configurationList = try configGenerator.generateManifestsConfig(pbxproj: pbxproj,
                                                                             options: options,
-                                                                            resourceLocator: resourceLocator,
-                                                                            configurations: configurations)
+                                                                            resourceLocator: resourceLocator)
 
         // Build phases
         let sourcesPhase = PBXSourcesBuildPhase()
@@ -110,6 +107,7 @@ final class TargetGenerator: TargetGenerating {
     func generateTarget(target: Target,
                         pbxproj: PBXProj,
                         pbxProject: PBXProject,
+                        projectSettings: Settings,
                         groups _: ProjectGroups,
                         fileElements: ProjectFileElements,
                         path: AbsolutePath,
@@ -117,13 +115,10 @@ final class TargetGenerator: TargetGenerating {
                         options: GenerationOptions,
                         graph: Graphing,
                         resourceLocator: ResourceLocating = ResourceLocator(),
-                        system: Systeming = System(),
-                        configurations: ConfigurationList) throws -> PBXNativeTarget {
+                        system: Systeming = System()) throws -> PBXNativeTarget {
         /// Products reference.
         let productFileReference = fileElements.products[target.productName]!
 
-        
-        
         /// Target
         let pbxTarget = PBXNativeTarget(name: target.name,
                                         buildConfigurationList: nil,
@@ -141,8 +136,8 @@ final class TargetGenerator: TargetGenerating {
         try configGenerator.generateTargetConfig(target,
                                                  pbxTarget: pbxTarget,
                                                  pbxproj: pbxproj,
+                                                 projectSettings: projectSettings,
                                                  fileElements: fileElements,
-                                                 configurations: configurations,
                                                  options: options,
                                                  sourceRootPath: sourceRootPath)
 

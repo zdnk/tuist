@@ -19,8 +19,8 @@ final class SettingsLinterTests: XCTestCase {
         let releasePath = fileHandler.currentPath.appending(component: "Release.xcconfig")
 
         let settings = Settings(configurations: [
-            Configuration(name: "Debug", buildConfiguration: .debug, xcconfig: debugPath),
-            Configuration(name: "Release", buildConfiguration: .release, xcconfig: releasePath)
+            .debug: Configuration(xcconfig: debugPath),
+            .release: Configuration(xcconfig: releasePath),
         ])
 
         let got = subject.lint(settings: settings)

@@ -15,7 +15,7 @@ class Project: Equatable, CustomStringConvertible {
     let targets: [Target]
 
     /// Project settings.
-    let settings: Settings?
+    let settings: Settings
 
     // MARK: - Init
 
@@ -27,7 +27,7 @@ class Project: Equatable, CustomStringConvertible {
     ///   - targets: Project settings.
     init(path: AbsolutePath,
          name: String,
-         settings: Settings? = nil,
+         settings: Settings,
          targets: [Target]) {
         self.path = path
         self.name = name

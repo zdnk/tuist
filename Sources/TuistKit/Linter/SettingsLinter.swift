@@ -36,8 +36,8 @@ final class SettingsLinter: SettingsLinting {
             }
         }
 
-        for case .some(let xcconfigFile) in settings.configurations.map(\.xcconfig) {
-            lintPath(xcconfigFile)
+        settings.xcconfigs().forEach { configFilePath in
+            lintPath(configFilePath)
         }
 
         return issues
