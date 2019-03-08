@@ -107,11 +107,9 @@ final class WorkspaceGenerator: WorkspaceGenerating {
             
         }
 
-        xcworkspace.data.children.append(contentsOf: try workspace.elements.map(recursiveChildElement))
+        xcworkspace.data.children.append(contentsOf: try workspace.elements.map(recursiveChildElement).sorted(by: workspaceDataElementSort))
 
-        xcworkspace.data.children.append(contentsOf: try workspace.elements.map(recursiveAppendChildren).sorted(by: workspaceDataElementSort))
-
-        try write(xcworkspace: workspace, to: workspacePath)
+        try write(xcworkspace: xcworkspace, to: workspacePath)
 
         return workspacePath
     }
