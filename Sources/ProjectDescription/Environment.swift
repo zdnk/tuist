@@ -1,26 +1,32 @@
 import Foundation
 
-public enum Either<A: Codable, B: Codable>: Codable{
-    case first(_ first: A)
-    case second(_ second: B)
-}
-
 public class Environment: Codable {
+
+    public enum VariableType {
+        case settings(_ name: EnvironmentIdentifier.ResourceIdentifier, _ value: Settings)
+    }
 
     public typealias Identifier = String
 
     public let settings: [EnvironmentIdentifier.ResourceIdentifier: Settings]
+
+    public convenience init(_ variables: VariableType...) {
+        let settingsKeyValues = variables.compactMap { (variable: VariableType) -> (String, Settings)? in
+            switch variable {
+            case let .settings(name, value):
+                return (name, value)
+            }
+        }
+        let settings: [EnvironmentIdentifier.ResourceIdentifier: Settings] = Dictionary(uniqueKeysWithValues: settingsKeyValues)
+        self.init(settings: settings)
+    }
 
     public init(settings: [EnvironmentIdentifier.ResourceIdentifier: Settings]) {
         self.settings = settings
         dumpIfNeeded(self)
     }
 
-    public static func variables() -> EnvironmentVariables {
-        return EnvironmentVariables(path: nil)
-    }
-
-    public static func variables(path: String) -> EnvironmentVariables {
+    public static func at(path: String) -> EnvironmentVariables {
         return EnvironmentVariables(path: path)
     }
 }
@@ -46,21 +52,12 @@ public struct EnvironmentIdentifier: Codable {
     }
 }
 
-private extension EnvironmentIdentifier.ResourceIdentifier {
-
-    static var `default`: String { return "default" }
-}
-
 public class EnvironmentVariables {
 
     private let path: String?
 
     init(path: String?) {
         self.path = path
-    }
-
-    public func settings() -> Settings {
-        return settings(EnvironmentIdentifier.ResourceIdentifier.default)
     }
 
     public func settings(_ resourceIdentifier: EnvironmentIdentifier.ResourceIdentifier) -> Settings {
@@ -71,34 +68,3 @@ public class EnvironmentVariables {
         return EnvironmentIdentifier(path: path, resourceIdentifier: resourceIdentifier)
     }
 }
-
-//let env = Environment.variables(path: "../")
-//let sets = env.settings()
-//
-//public class EnvironmentVariables {
-//
-//    private let _settings: [Environment.Identifier: Settings] = [:]
-//
-//    public func settings() -> Settings {
-//        return try settings(Environment.Identifier.default)
-//    }
-//
-//    public func settings(_ identifier: Environment.Identifier) throws -> Settings {
-//        guard let value = _settings[identifier] else {
-//            return Settings("fdsafewaf ewaf eaw") // throw!!
-//        }
-//        return value
-//    }
-//}
-
-/**
- let env = Environment.from("../")
-
- Project(
-    settings: env.settings()
-
- or
-
- Project(
-    settings: env.settings("cpp_settings")
- */

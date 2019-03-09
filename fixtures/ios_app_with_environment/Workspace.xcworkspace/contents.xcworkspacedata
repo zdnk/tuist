@@ -8,9 +8,9 @@
       location = "group:Framework2/Framework2.xcodeproj">
    </FileRef>
    <FileRef
-      location = "group:App/MainApp.xcodeproj">
+      location = "group:Framework1/Framework1.xcodeproj">
    </FileRef>
    <FileRef
-      location = "group:Framework1/Framework1.xcodeproj">
+      location = "group:App/MainApp.xcodeproj">
    </FileRef>
 </Workspace>

@@ -1,5 +1,6 @@
 import ProjectDescription
 
+let environment = Environment.at(path: "..")
 let project = Project(name: "Framework2",
                       targets: [
                         Target(name: "Framework2",
@@ -9,7 +10,7 @@ let project = Project(name: "Framework2",
                                infoPlist: "Config/Framework2-Info.plist",
                                sources: "Sources/**",
                                dependencies: [],
-                               settings: Environment.settings("default")),
+                               settings: environment.settings("default")),
                         Target(name: "Framework2Tests",
                                platform: .iOS,
                                product: .unitTests,

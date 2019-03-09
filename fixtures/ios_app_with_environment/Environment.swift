@@ -12,5 +12,5 @@ let targetSettings = Settings(base: [
                                 ])
 
 let enviornment = Environment(
-    settings: ["default": targetSettings]
+    .settings("default", targetSettings)
 )
