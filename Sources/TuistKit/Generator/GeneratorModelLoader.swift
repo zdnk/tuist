@@ -51,7 +51,11 @@ class GeneratorModelLoader: GeneratorModelLoading {
         guard let environmentPath = environmentPath else {
             return nil
         }
-        let environmentJson = try manifestLoader.load(.environment, path: environmentPath)
+        guard let manifest = Manifest.manifest(from: environmentPath.basename) else {
+            // TODO: handle unexpected type of manifest
+            return nil
+        }
+        let environmentJson = try manifestLoader.load(manifest, path: environmentPath.parentDirectory)
         let environment = try Environment.from(json: environmentJson, path: environmentPath, fileHandler: fileHandler)
         return environment
     }
@@ -278,7 +282,7 @@ class Environment {
 
     static func from(json: JSON, path: AbsolutePath, fileHandler: FileHandling) throws -> Environment {
         let identifierToJson: [String: JSON] = try json.get("settings")
-        let settings = try identifierToJson.mapValues { try TuistKit.Settings.from(json: $0, path: path, fileHandler: fileHandler, environment: nil) }
+        let settings = try identifierToJson.mapValues { try TuistKit.Settings.from(json: $0, path: path.parentDirectory, fileHandler: fileHandler, environment: nil) }
         return Environment(settings: settings)
     }
 }

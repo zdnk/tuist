@@ -64,8 +64,10 @@ class GenerateCommand: NSObject, Command {
     }
 
     func run(with arguments: ArgumentParser.Result) throws {
-        modelLoader.environmentPath = arguments.get(environmentPathArgument).map { AbsolutePath($0) }
         let path = self.path(arguments: arguments)
+        modelLoader.environmentPath = arguments.get(environmentPathArgument)
+            .map { $0.hasSuffix(".Environment.swift") ? $0 : "\($0).Environment.swift" }
+            .map { $0.hasPrefix("/") ?  AbsolutePath($0) :  AbsolutePath(path, $0) }
         let graph = try graphLoader.load(path: path)
         try workspaceGenerator.generate(path: path,
                                         graph: graph,

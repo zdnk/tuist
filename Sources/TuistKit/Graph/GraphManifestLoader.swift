@@ -52,11 +52,12 @@ enum GraphManifestLoaderError: FatalError, Equatable {
     }
 }
 
-enum Manifest: CaseIterable {
+enum Manifest: Equatable, Hashable {
     case project
     case workspace
     case setup
-    case environment
+    case defaultEnvironment
+    case environment(name: String)
 
     var fileName: String {
         switch self {
@@ -66,11 +67,25 @@ enum Manifest: CaseIterable {
             return "Workspace.swift"
         case .setup:
             return "Setup.swift"
-        case .environment:
+        case .defaultEnvironment:
             return "Environment.swift"
+        case let .environment(name):
+            return name
         }
     }
 
+    static func manifest(from fileName: String) -> Manifest? {
+        switch fileName {
+        case Manifest.project.fileName: return .project
+        case Manifest.workspace.fileName: return .workspace
+        case Manifest.setup.fileName: return .setup
+        case Manifest.defaultEnvironment.fileName: return .defaultEnvironment
+        case let name where name.hasSuffix(".Environment.swift"):
+            return .environment(name: fileName)
+        default:
+            return nil
+        }
+    }
 }
 
 protocol GraphManifestLoading {
@@ -128,13 +143,15 @@ class GraphManifestLoader: GraphManifestLoading {
         } else {
             throw GraphManifestLoaderError.manifestNotFound(manifest, path)
         }
-        
     }
 
     func manifests(at path: AbsolutePath) -> Set<Manifest> {
-        return .init(Manifest.allCases.filter{
-            return fileHandler.exists(path.appending(component: $0.fileName))
-        })
+        let manifests = try? localFileSystem.getDirectoryContents(path)
+            .map { path.appending(component: $0) }
+            .filter { localFileSystem.isFile($0) }
+            .map { $0.basename }
+            .compactMap { Manifest.manifest(from: $0) }
+        return Set(manifests ?? [])
     }
 
     func loadSetup(at path: AbsolutePath) throws -> [Upping] {
@@ -155,7 +172,7 @@ class GraphManifestLoader: GraphManifestLoading {
 
     fileprivate func loadManifest(path: AbsolutePath) throws -> JSON {
         let projectDescriptionPath = try resourceLocator.projectDescription()
-        var arguments: [String] = [
+        let arguments: [String] = [
             "/usr/bin/xcrun",
             "swiftc",
             "--driver-mode=swift",
@@ -163,10 +180,10 @@ class GraphManifestLoader: GraphManifestLoading {
             "-I", projectDescriptionPath.parentDirectory.asString,
             "-L", projectDescriptionPath.parentDirectory.asString,
             "-F", projectDescriptionPath.parentDirectory.asString,
-            "-lProjectDescription"
+            "-lProjectDescription",
+            path.asString,
+            "--dump"
         ]
-        arguments.append(path.asString)
-        arguments.append("--dump")
 
         guard let jsonString = try system.capture(arguments).spm_chuzzle() else {
             throw GraphManifestLoaderError.unexpectedOutput(path)

@@ -34,7 +34,6 @@ public class Configuration: Codable {
     public static func release(name: String = "Release", settings: BuildSettings = [:], xcconfig: String? = nil) -> Configuration {
         return Configuration(name: name, settings: settings, xcconfig: xcconfig, buildConfiguration: .release)
     }
-    
 }
 
 // MARK: - Settings
@@ -43,7 +42,7 @@ public class Settings: Codable, EnvironmentReference {
     
     public let base: BuildSettings
     public let configurations: [Configuration]
-    public let identifier: Environment.Identifier?
+    public let identifier: EnvironmentIdentifier?
 
     public init(base: BuildSettings = [:], configurations: [Configuration] = []) {
         self.base = base
@@ -51,7 +50,7 @@ public class Settings: Codable, EnvironmentReference {
         self.identifier = nil
     }
 
-    init(_ identifier: String) {
+    init(_ identifier: EnvironmentIdentifier) {
         self.base = [:]
         self.configurations = []
         self.identifier = identifier
