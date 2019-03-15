@@ -66,7 +66,7 @@ final class WorkspaceGenerator: WorkspaceGenerating {
         let workspaceData = XCWorkspaceData(children: [])
         let xcworkspace = XCWorkspace(data: workspaceData)
 
-        func recursiveChildElement(element: WorkspaceStructure.Element) throws -> XCWorkspaceDataElement {
+        func recursiveChildElement(element: WorkspaceStructure.Element, path: AbsolutePath) throws -> XCWorkspaceDataElement {
             switch element {
             case let .file(path: filePath):
                 return workspaceFileElement(path: filePath.relative(to: path))
@@ -74,14 +74,16 @@ final class WorkspaceGenerator: WorkspaceGenerating {
             case let .folderReference(path: folderPath):
                 return .file(XCWorkspaceDataFileRef(location: .group(folderPath.relative(to: path).asString)))
 
-            case let .group(name: name, contents: contents):
+            case let .group(name: name, absolutePath: absolutePath, contents: contents):
 
-                let location = XCWorkspaceDataElementLocationType.container("")
+                let location = XCWorkspaceDataElementLocationType.group(absolutePath.relative(to: path).asString)
                 
                 let groupReference = XCWorkspaceDataGroup(
                     location: location,
                     name: name,
-                    children: try contents.map(recursiveChildElement).sorted(by: workspaceDataElementSort)
+                    children: try contents.map {
+                        try recursiveChildElement(element: $0, path: absolutePath)
+                    }.sorted(by: workspaceDataElementSort)
                 )
 
                 return .group(groupReference)
@@ -108,7 +110,10 @@ final class WorkspaceGenerator: WorkspaceGenerating {
             }
         }
         
-        xcworkspace.data.children.append(contentsOf: try workspace.contents.map(recursiveChildElement).sorted(by: workspaceDataElementSort))
+        xcworkspace.data
+            .children
+            .append(contentsOf: try workspace.contents.map { try recursiveChildElement(element: $0, path: path) }
+                                              .sorted(by: workspaceDataElementSort))
 
         try write(xcworkspace: xcworkspace, to: workspacePath)
 

@@ -7,7 +7,7 @@ struct WorkspaceStructure {
     indirect enum Element: Equatable {
         case file(path: AbsolutePath)
         case folderReference(path: AbsolutePath)
-        case group(name: String, contents: [Element])
+        case group(name: String, absolutePath: AbsolutePath, contents: [Element])
         case project(path: AbsolutePath)
     }
     
@@ -159,14 +159,15 @@ struct WorkspaceStructureFactory {
             return .project(path: path)
         case .directory(let path, let contents):
             
-            if case let .project(path)? = contents.nodes.first, contents.nodes.count == 1 {
-                return .project(path: path)
-            } else if contents.nodes.containsProjectInGraph() {
-                return .group(name: path.basename, contents: contents.nodes.compactMap(directoryGraphToWorkspaceStructureElement))
-            } else {
-                return .folderReference(path: path)
-            }
-            
+//            if case let .project(path)? = contents.nodes.first, contents.nodes.count == 1 {
+//                return .project(path: path)
+//            } else if contents.nodes.containsProjectInGraph() {
+                return .group(name: path.basename,
+                              absolutePath: path,
+                              contents: contents.nodes.compactMap(directoryGraphToWorkspaceStructureElement))
+//            } else {
+//                return .folderReference(path: path)
+//            }
         }
         
     }
