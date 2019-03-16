@@ -69,7 +69,7 @@ extension TuistKit.Project {
 
         return Project(path: path,
                        name: name,
-                       settings: settings,
+                       settings: settings ?? Settings.default,
                        filesGroup: .group(name: "Project"),
                        targets: targets)
     }
@@ -127,17 +127,17 @@ extension TuistKit.Target {
 extension TuistKit.Settings {
     static func from(manifest: ProjectDescription.Settings, path: AbsolutePath) -> TuistKit.Settings {
         let base = manifest.base
-        let debug = manifest.debug.flatMap { TuistKit.Configuration.from(manifest: $0, path: path) }
-        let release = manifest.release.flatMap { TuistKit.Configuration.from(manifest: $0, path: path) }
-        return Settings(base: base, debug: debug, release: release)
+        let configurations = manifest.configurations.compactMap { TuistKit.Configuration.from(manifest: $0, path: path) }
+        return Settings(base: base, configurations: Dictionary(uniqueKeysWithValues: configurations))
     }
 }
 
 extension TuistKit.Configuration {
-    static func from(manifest: ProjectDescription.Configuration, path: AbsolutePath) -> TuistKit.Configuration {
+    static func from(manifest: ProjectDescription.Configuration, path: AbsolutePath) -> (TuistKit.BuildConfiguration, TuistKit.Configuration) {
         let settings = manifest.settings
         let xcconfig = manifest.xcconfig.flatMap({ path.appending(RelativePath($0)) })
-        return Configuration(settings: settings, xcconfig: xcconfig)
+        let buildConfiguration =  TuistKit.BuildConfiguration.from(manifest: manifest.buildConfiguration, name: manifest.name)
+        return (buildConfiguration, Configuration(settings: settings, xcconfig: xcconfig))
     }
 }
 
@@ -227,7 +227,7 @@ extension TuistKit.TestAction {
     static func from(manifest: ProjectDescription.TestAction) -> TuistKit.TestAction {
         let targets = manifest.targets
         let arguments = manifest.arguments.map { TuistKit.Arguments.from(manifest: $0) }
-        let config = BuildConfiguration.from(manifest: manifest.config)
+        let config = BuildConfiguration.from(manifest: manifest.config, name: manifest.config.rawValue)
         let coverage = manifest.coverage
         return TestAction(targets: targets,
                           arguments: arguments,
@@ -238,7 +238,7 @@ extension TuistKit.TestAction {
 
 extension TuistKit.RunAction {
     static func from(manifest: ProjectDescription.RunAction) -> TuistKit.RunAction {
-        let config = BuildConfiguration.from(manifest: manifest.config)
+        let config = BuildConfiguration.from(manifest: manifest.config, name: manifest.config.rawValue)
         let executable = manifest.executable
         let arguments = manifest.arguments.map { TuistKit.Arguments.from(manifest: $0) }
 
@@ -256,12 +256,12 @@ extension TuistKit.Arguments {
 }
 
 extension TuistKit.BuildConfiguration {
-    static func from(manifest: ProjectDescription.BuildConfiguration) -> TuistKit.BuildConfiguration {
+    static func from(manifest: ProjectDescription.BuildConfiguration, name: String) -> TuistKit.BuildConfiguration {
         switch manifest {
-        case .debug:
-            return .debug
         case .release:
-            return .release
+            return BuildConfiguration(name: name, variant: .release)
+        case .debug:
+            return BuildConfiguration(name: name, variant: .debug)
         }
     }
 }

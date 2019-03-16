@@ -59,6 +59,14 @@ public protocol FileHandling: AnyObject {
     /// - Throws: An error if the temporary directory cannot be created or the closure throws.
     func inTemporaryDirectory(_ closure: (AbsolutePath) throws -> Void) throws
 
+    /// Runs the given closure passing a temporary directory to it. When the closure
+    /// finishes its execution, the temporary directory gets destroyed.
+    ///
+    /// - Parameter closure: Closure to be executed with the temporary directory.
+    /// - Returns: The result of closure.
+    /// - Throws: An error if the temporary directory cannot be created or the closure throws.
+    func inTemporaryDirectory<T>(_ closure: (AbsolutePath) throws -> T) throws -> T
+
     func glob(_ path: AbsolutePath, glob: String) -> [AbsolutePath]
     func createFolder(_ path: AbsolutePath) throws
     func delete(_ path: AbsolutePath) throws
@@ -67,6 +75,7 @@ public protocol FileHandling: AnyObject {
 }
 
 public final class FileHandler: FileHandling {
+
     public init() {}
 
     /// Returns the current path.
@@ -91,6 +100,17 @@ public final class FileHandler: FileHandling {
     public func inTemporaryDirectory(_ closure: (AbsolutePath) throws -> Void) throws {
         let directory = try TemporaryDirectory(removeTreeOnDeinit: true)
         try closure(directory.path)
+    }
+
+    /// Runs the given closure passing a temporary directory to it. When the closure
+    /// finishes its execution, the temporary directory gets destroyed.
+    ///
+    /// - Parameter closure: Closure to be executed with the temporary directory.
+    /// - Returns: The result of closure.
+    /// - Throws: An error if the temporary directory cannot be created or the closure throws.
+    public func inTemporaryDirectory<T>(_ closure: (AbsolutePath) throws -> T) throws -> T {
+        let directory = try TemporaryDirectory(removeTreeOnDeinit: true)
+        return try closure(directory.path)
     }
 
     /// Returns true if there's a folder or file at the given path.

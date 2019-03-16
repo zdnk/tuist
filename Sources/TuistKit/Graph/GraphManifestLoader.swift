@@ -50,10 +50,13 @@ enum GraphManifestLoaderError: FatalError, Equatable {
     }
 }
 
-enum Manifest: CaseIterable {
+enum Manifest: Equatable, Hashable {
     case project
     case workspace
     case setup
+    case environment(name: String)
+
+    static let allPredefinedCases: Set<Manifest> = [.project, .workspace, .setup]
 
     var fileName: String {
         switch self {
@@ -63,6 +66,20 @@ enum Manifest: CaseIterable {
             return "Workspace.swift"
         case .setup:
             return "Setup.swift"
+        case let .environment(name):
+            return name
+        }
+    }
+
+    static func manifest(from fileName: String) -> Manifest? {
+        switch fileName {
+        case Manifest.project.fileName: return .project
+        case Manifest.workspace.fileName: return .workspace
+        case Manifest.setup.fileName: return .setup
+        case let name where name.hasSuffix(".Environment.swift"):
+            return .environment(name: fileName)
+        default:
+            return nil
         }
     }
 }
@@ -93,6 +110,9 @@ class GraphManifestLoader: GraphManifestLoading {
     /// A decoder instance for decoding the raw manifest data to their concrete types
     private let decoder: JSONDecoder
 
+    /// A parser instance for scanning the raw manifest data to find Environment.at calls
+    private let environmentAtParser: EnvironmentAtParser
+
     // MARK: - Init
 
     /// Initializes the manifest loader with its attributes.
@@ -111,6 +131,7 @@ class GraphManifestLoader: GraphManifestLoading {
         self.resourceLocator = resourceLocator
         self.deprecator = deprecator
         decoder = JSONDecoder()
+        environmentAtParser = EnvironmentAtParser()
     }
 
     func manifestPath(at path: AbsolutePath, manifest: Manifest) throws -> AbsolutePath {
@@ -124,7 +145,7 @@ class GraphManifestLoader: GraphManifestLoading {
     }
 
     func manifests(at path: AbsolutePath) -> Set<Manifest> {
-        return .init(Manifest.allCases.filter {
+        return .init(Manifest.allPredefinedCases.filter {
             fileHandler.exists(path.appending(component: $0.fileName))
         })
     }
@@ -165,8 +186,40 @@ class GraphManifestLoader: GraphManifestLoading {
     }
 
     private func loadManifestData(at path: AbsolutePath) throws -> Data {
+        return try fileHandler.inTemporaryDirectory { temporaryDirPath in
+            let environments = try dumpRequiredEnvironments(at: path)
+            let temporaryManifestPath = temporaryDirPath.appending(component: "\(UUID().uuidString).swift")
+            try fileHandler.copy(from: path, to: temporaryManifestPath)
+            return try loadManifestWithEnvironmentsData(at: temporaryManifestPath,
+                                                        environments: environments)
+        }
+    }
+
+    private func loadManifestWithEnvironmentsData(at path: AbsolutePath, environments: [String]) throws -> Data {
+        let loadMethodCall: (String) -> String = { json in return "Environment.load(from: \"\(json)\")" }
+        let manifestContent = try String(contentsOfFile: path.asString)
+        let manifestMutableContent = NSMutableString(string: manifestContent)
+        let environmentsRanges = environmentAtParser.parse(manifestContent)
+        let offsets = environmentsRanges.reduce(into: [0]) { (result, range) in
+            let last = result.last!
+            let loadMethodCallString = loadMethodCall(environments[result.count - 1])
+            result.append(last + loadMethodCallString.utf8.count - range.length)
+        }
+        environmentsRanges.enumerated().forEach { i, range in
+            let rightOffset = NSRange(location: range.location + offsets[i], length: range.length)
+            let newString = loadMethodCall(environments[i])
+            manifestMutableContent.replaceCharacters(in: rightOffset, with: newString)
+        }
+
+        try (manifestMutableContent as String).write(to: path.asURL, atomically: true, encoding: .utf8)
+        
+        let jsonString = try dumpManifest(at: path, type: .default)
+        return try utf8Data(from: jsonString, at: path)
+    }
+
+    private func dumpManifest(at path: AbsolutePath, type: DumpType = .default) throws -> String {
         let projectDescriptionPath = try resourceLocator.projectDescription()
-        var arguments: [String] = [
+        let arguments: [String] = [
             "/usr/bin/xcrun",
             "swiftc",
             "--driver-mode=swift",
@@ -175,15 +228,54 @@ class GraphManifestLoader: GraphManifestLoading {
             "-L", projectDescriptionPath.parentDirectory.asString,
             "-F", projectDescriptionPath.parentDirectory.asString,
             "-lProjectDescription",
+            path.asString,
+            type.rawValue
         ]
-        arguments.append(path.asString)
-        arguments.append("--dump")
+        guard let jsonString = try system.capture(arguments).spm_chuzzle() else {
+            switch type {
+            case .default:
+                throw GraphManifestLoaderError.unexpectedOutput(path)
+            case .environment:
+                return ""
+            }
+        }
+        return jsonString
+    }
 
-        guard let jsonString = try system.capture(arguments).spm_chuzzle(),
-            let data = jsonString.data(using: .utf8) else {
+    private func dumpRequiredEnvironments(at path: AbsolutePath) throws -> [String] {
+        return try dumpManifest(at: path, type: .environment)
+            .split(separator: "\n")
+            .map { String($0) }
+            .map { try utf8Data(from: $0, at: path) }
+            .map { try decoder.decode(EnvironmentAt.self, from: $0) }
+            .map { (RelativePath(Array(RelativePath($0.path).components.dropLast()).joined(separator: "/")),
+                    try dumpManifest(at: path.parentDirectory.appending(RelativePath($0.path)))) }
+            .map { $0.1
+                .replacingOccurrences(of: "${ENVIRONMENT_DIR}", with: $0.0.asString)
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"") }
+    }
+
+    private func utf8Data(from string: String, at path: AbsolutePath) throws -> Data {
+        guard let data = string.data(using: .utf8) else {
             throw GraphManifestLoaderError.unexpectedOutput(path)
         }
-
         return data
+    }
+
+    private enum DumpType: String {
+        case `default` = "--dump"
+        case environment = "--dump-environment"
+    }
+
+    class EnvironmentAtParser {
+
+        // swiftlint:disable:next force_try
+        private let regex = try! NSRegularExpression(pattern: "Environment[\\s]*\\.at\\([\\s]*path:[a-zA-Z0-9\"\\/\\.\\ ]+[\\s]*\\)", options: [])
+
+        func parse(_ manifestContent: String) -> [NSRange] {
+            let matches = regex.matches(in: manifestContent, range: NSRange(location: 0, length: manifestContent.utf8.count))
+            return matches.map { $0.range }
+        }
     }
 }

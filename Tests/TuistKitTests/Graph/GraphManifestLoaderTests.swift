@@ -20,10 +20,26 @@ final class GraphManifestLoaderErrorTests: XCTestCase {
 }
 
 final class ManifestTests: XCTestCase {
+
+    func test_allPredefinedCases() {
+        XCTAssertEqual(Manifest.allPredefinedCases, Set([.project, .workspace, .setup]))
+    }
+
     func test_fileName() {
         XCTAssertEqual(Manifest.project.fileName, "Project.swift")
         XCTAssertEqual(Manifest.workspace.fileName, "Workspace.swift")
         XCTAssertEqual(Manifest.setup.fileName, "Setup.swift")
+        XCTAssertEqual(Manifest.environment(name: "Shared.Environment.swift").fileName, "Shared.Environment.swift")
+    }
+
+    func test_manifest() {
+        XCTAssertEqual(Manifest.manifest(from: "Project.swift"), Manifest.project)
+        XCTAssertEqual(Manifest.manifest(from: "Workspace.swift"), Manifest.workspace)
+        XCTAssertEqual(Manifest.manifest(from: "Setup.swift"), Manifest.setup)
+        XCTAssertEqual(Manifest.manifest(from: "Shared.Environment.swift"), Manifest.environment(name: "Shared.Environment.swift"))
+
+        XCTAssertNil(Manifest.manifest(from: "Shared_Environment.swift"))
+        XCTAssertNil(Manifest.manifest(from: "Shared.Environment"))
     }
 }
 
@@ -130,22 +146,6 @@ final class GraphManifestLoaderTests: XCTestCase {
         }
     }
 
-    func test_manifestPath() throws {
-        // Given
-        let manifestsPaths = Manifest.allCases.map {
-            fileHandler.currentPath.appending(component: $0.fileName)
-        }
-        try manifestsPaths.forEach { try fileHandler.touch($0) }
-
-        // When
-        let got = try Manifest.allCases.map {
-            try subject.manifestPath(at: fileHandler.currentPath, manifest: $0)
-        }
-
-        // Then
-        XCTAssertEqual(got, manifestsPaths)
-    }
-
     func test_manifestsAt() throws {
         // Given
         try fileHandler.touch(fileHandler.currentPath.appending(component: "Project.swift"))
@@ -159,5 +159,177 @@ final class GraphManifestLoaderTests: XCTestCase {
         XCTAssertTrue(got.contains(.project))
         XCTAssertTrue(got.contains(.workspace))
         XCTAssertTrue(got.contains(.setup))
+    }
+
+    func test_loadWorkspace_withEnvironments() throws {
+        // Given
+        let first = """
+        import ProjectDescription
+
+        let enviornment = Environment(
+            strings: ["workspace_name": "WorkspaceName"]
+        )
+        """
+
+        let second = """
+        import ProjectDescription
+
+        let enviornment = Environment(
+            strings: ["workspace_name2": "WorkspaceName2"]
+        )
+        """
+
+        let manifest = """
+        import ProjectDescription
+
+        let env = Environment.at(path: "../First.Environment.swift")
+        let env2 = Environment.at(path: "../Second.Environment.swift")
+
+        let n1 = env.strings["workspace_name"] ?? "-"
+        let n2 = env2.strings["workspace_name2"] ?? "-"
+        let wn = "\\(n1)\\(n2)"
+        let workspace = Workspace(name: wn,
+                                  projects: ["project1"])
+        """
+
+        let firstPath = fileHandler.currentPath.appending(component: "First.Environment.swift")
+        try first.write(to: firstPath.url, atomically: true, encoding: .utf8)
+
+        let secondPath = fileHandler.currentPath.appending(component: "Second.Environment.swift")
+        try second.write(to: secondPath.url, atomically: true, encoding: .utf8)
+
+        let manifestPath = fileHandler.currentPath.appending(components: "Project", "Workspace.swift")
+        try fileHandler.createFolder(manifestPath.parentDirectory)
+        try manifest.write(to: manifestPath.url, atomically: true, encoding: .utf8)
+
+        // When
+        let got = try subject.loadWorkspace(at: manifestPath.parentDirectory)
+
+        // Then
+        XCTAssertEqual(got.name, "WorkspaceNameWorkspaceName2")
+    }
+}
+
+final class EnvironmentAtParserTests: XCTestCase {
+
+    private var subject: GraphManifestLoader.EnvironmentAtParser!
+
+    override func setUp() {
+        super.setUp()
+
+        subject = GraphManifestLoader.EnvironmentAtParser()
+    }
+
+    func test_parse_whenNoCalls() {
+        // Given
+        let content = """
+        import ProjectDescription
+        let workspace = Workspace(name: "WorkspaceName",
+                                  projects: ["project1"])
+        """
+
+        // When
+        let got = subject.parse(content)
+
+        // Then
+        XCTAssertEqual(got, [])
+    }
+
+    func test_parse_whenSingleCall() {
+        // Given
+        let variable = self.variable(name: "env")
+        let environmentAt = "Environment.at(path: \"File1.Environment.swift\")"
+        let content = "\(variable)\(environmentAt)\(suffix())"
+
+        // When
+        let got = subject.parse(content)
+
+        // Then
+        XCTAssertEqual(got, [NSRange(location: variable.count, length: environmentAt.count)])
+    }
+
+    func test_parse_whenSingleCallPathWithSpaces() {
+        // Given
+        let variable = self.variable(name: "env")
+        let environmentAt = "Environment.at(path: \"   File1.Environment.swift   \")"
+        let content = "\(variable)\(environmentAt)\(suffix())"
+
+        // When
+        let got = subject.parse(content)
+
+        // Then
+        XCTAssertEqual(got, [NSRange(location: variable.count, length: environmentAt.count)])
+    }
+
+    func test_parse_whenSingleCallAndUntypicalSpacing() {
+        // Given
+        let variable = self.variable(name: "env")
+        let environmentAt = "Environment   .at(          path:\"File1.Environment.swift\"             )"
+        let content = "\(variable)\(environmentAt)\(suffix())"
+
+        // When
+        let got = subject.parse(content)
+
+        // Then
+        XCTAssertEqual(got, [NSRange(location: variable.count, length: environmentAt.count)])
+    }
+
+    func test_parse_whenSingleCallInMultipleLines() {
+        // Given
+        let variable = self.variable(name: "env")
+        let environmentAt = """
+        Environment
+            .at(
+                path: \"File1.Environment.swift\")
+        """
+        let content = "\(variable)\(environmentAt)\(suffix())"
+
+        // When
+        let got = subject.parse(content)
+
+        // Then
+        XCTAssertEqual(got, [NSRange(location: variable.count, length: environmentAt.count)])
+    }
+
+    func test_parse_whenMultipleCalls() {
+        // Given
+        let environmentAt1 = "Environment.at(path: \"File1.Environment.swift\")"
+        let environmentAt2 = "Environment.at(path: \"../Dir/File2.Environment.swift\")"
+        let environmentAt3 = "Environment.at(path: \"../Dir/File3\")"
+
+        var content = String()
+        content.append(variable(name: "env")); let location1 = content.count
+        content.append(environmentAt1)
+        content.append("\n")
+        content.append(variable(name: "env2")); let location2 = content.count
+        content.append(environmentAt2)
+        content.append("\n")
+        content.append("_ = 0\n")
+        content.append(variable(name: "env3")); let location3 = content.count
+        content.append(environmentAt3)
+        content.append(suffix())
+
+        // When
+        let got = subject.parse(content)
+
+        // Then
+        XCTAssertEqual(got, [
+            NSRange(location: location1, length: environmentAt1.count),
+            NSRange(location: location2, length: environmentAt2.count),
+            NSRange(location: location3, length: environmentAt3.count),
+        ])
+    }
+
+    // MARK: - Helpers
+
+    private func variable(name: String) -> String {
+        return "\nlet \(name) = "
+    }
+
+    private func suffix() -> String {
+        return """
+        let workspace = Workspace(name: "WorkspaceName",
+        projects: ["project1"])
+        """
     }
 }

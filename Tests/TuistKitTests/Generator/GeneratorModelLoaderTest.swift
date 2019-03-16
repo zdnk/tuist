@@ -126,9 +126,15 @@ class GeneratorModelLoaderTest: XCTestCase {
 
     func test_settings() throws {
         // Given
-        let debug = ConfigurationManifest(settings: ["Debug": "Debug"], xcconfig: "debug.xcconfig")
-        let release = ConfigurationManifest(settings: ["Release": "Release"], xcconfig: "release.xcconfig")
-        let manifest = SettingsManifest(base: ["base": "base"], debug: debug, release: release)
+        let debug = ConfigurationManifest(name: "debug",
+                                          settings: ["Debug": "Debug"],
+                                          xcconfig: "debug.xcconfig",
+                                          buildConfiguration: .debug)
+        let release = ConfigurationManifest(name: "release",
+                                            settings: ["Release": "Release"],
+                                            xcconfig: "release.xcconfig",
+                                            buildConfiguration: .release)
+        let manifest = SettingsManifest(base: ["Base": "Base"], configurations: [debug, release])
 
         // When
         let model = TuistKit.Settings.from(manifest: manifest, path: path)
@@ -294,32 +300,32 @@ class GeneratorModelLoaderTest: XCTestCase {
         }
     }
 
-    func assert(settings: TuistKit.Settings,
+    private func assert(settings: TuistKit.Settings,
                 matches manifest: ProjectDescription.Settings,
                 at path: AbsolutePath,
                 file: StaticString = #file,
                 line: UInt = #line) {
         XCTAssertEqual(settings.base, manifest.base, file: file, line: line)
 
-        optionalAssert(settings.debug, manifest.debug, file: file, line: line) {
-            assert(configuration: $0, matches: $1, at: path, file: file, line: line)
-        }
-
-        optionalAssert(settings.release, manifest.release, file: file, line: line) {
-            assert(configuration: $0, matches: $1, at: path, file: file, line: line)
+        let sortedConfigurations = settings.configurations.sorted { (l, r) -> Bool in l.key.name < r.key.name }
+        let sortedManifsetConfigurations = manifest.configurations.sorted { (l, r) -> Bool in l.name < r.name }
+        for (configuration, manifestConfiguration) in zip(sortedConfigurations, sortedManifsetConfigurations) {
+            assert(configuration: configuration, matches: manifestConfiguration, at: path, file: file, line: line)
         }
     }
 
-    func assert(configuration: TuistKit.Configuration,
-                matches manifest: ProjectDescription.Configuration,
-                at path: AbsolutePath,
-                file: StaticString = #file,
-                line: UInt = #line) {
-        XCTAssertEqual(configuration.settings, manifest.settings, file: file, line: line)
-        XCTAssertEqual(configuration.xcconfig, manifest.xcconfig.map { path.appending(RelativePath($0)) }, file: file, line: line)
+    private func assert(configuration: (TuistKit.BuildConfiguration, TuistKit.Configuration?),
+                        matches manifest: ProjectDescription.Configuration,
+                        at path: AbsolutePath,
+                        file: StaticString = #file,
+                        line: UInt = #line) {
+        XCTAssertEqual(configuration.0.name, manifest.name)
+        XCTAssertEqual(configuration.0.variant.rawValue, manifest.buildConfiguration.rawValue)
+        XCTAssertEqual(configuration.1?.settings, manifest.settings, file: file, line: line)
+        XCTAssertEqual(configuration.1?.xcconfig, manifest.xcconfig.map { path.appending(RelativePath($0)) }, file: file, line: line)
     }
 
-    func assert(coreDataModels: [TuistKit.CoreDataModel],
+    private func assert(coreDataModels: [TuistKit.CoreDataModel],
                 matches manifests: [ProjectDescription.CoreDataModel],
                 at path: AbsolutePath,
                 file: StaticString = #file,
@@ -368,8 +374,8 @@ class GeneratorModelLoaderTest: XCTestCase {
                 file: StaticString = #file,
                 line: UInt = #line) {
         XCTAssertEqual(testAction.targets, manifest.targets, file: file, line: line)
-        XCTAssertTrue(testAction.config == manifest.config, file: file, line: line)
         XCTAssertEqual(testAction.coverage, manifest.coverage, file: file, line: line)
+        assert(config: testAction.config, matches: manifest.config, file: file, line: line)
         optionalAssert(testAction.arguments, manifest.arguments) {
             assert(arguments: $0, matches: $1, file: file, line: line)
         }
@@ -380,7 +386,7 @@ class GeneratorModelLoaderTest: XCTestCase {
                 file: StaticString = #file,
                 line: UInt = #line) {
         XCTAssertEqual(runAction.executable, manifest.executable, file: file, line: line)
-        XCTAssertTrue(runAction.config == manifest.config, file: file, line: line)
+        assert(config: runAction.config, matches: manifest.config, file: file, line: line)
         optionalAssert(runAction.arguments, manifest.arguments) {
             assert(arguments: $0, matches: $1, file: file, line: line)
         }
@@ -392,6 +398,13 @@ class GeneratorModelLoaderTest: XCTestCase {
                 line: UInt = #line) {
         XCTAssertEqual(arguments.environment, manifest.environment, file: file, line: line)
         XCTAssertEqual(arguments.launch, manifest.launch, file: file, line: line)
+    }
+
+    func assert(config: TuistKit.BuildConfiguration,
+                matches manifest: ProjectDescription.BuildConfiguration,
+                file: StaticString = #file,
+                line: UInt = #line) {
+        XCTAssertEqual(config.variant.rawValue, manifest.rawValue)
     }
 
     func optionalAssert<A, B>(_ optionalA: A?,

@@ -94,12 +94,10 @@ class ProjectFileElements {
         var files = Set<AbsolutePath>()
 
         /// Config files
-        if let debugConfigFile = project.settings?.debug?.xcconfig {
-            files.insert(debugConfigFile)
-        }
-        if let releaseConfigFile = project.settings?.release?.xcconfig {
-            files.insert(releaseConfigFile)
-        }
+        project.settings.configurations.values
+            .compactMap { $0?.xcconfig }
+            .forEach { files.insert($0) }
+
         return files
     }
 
@@ -132,12 +130,10 @@ class ProjectFileElements {
         }
 
         // Config files
-        if let debugConfigFile = target.settings?.debug?.xcconfig {
-            files.insert(debugConfigFile)
-        }
-        if let releaseConfigFile = target.settings?.release?.xcconfig {
-            files.insert(releaseConfigFile)
-        }
+        target.settings?.configurations.values
+            .compactMap { $0?.xcconfig }
+            .forEach { files.insert($0) }
+
         return files
     }
 
