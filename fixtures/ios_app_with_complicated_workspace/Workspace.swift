@@ -10,6 +10,7 @@ let workspace = Workspace(
         "Workspace.swift",
         "*.playground",
         "Documentation/**/*.md",
-        "../ios_app_with_setup/Setup.swift"
+        "../ios_app_with_setup/Setup.swift",
+        .folderReference(path: "Proposals")
     ]
 )

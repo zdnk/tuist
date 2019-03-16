@@ -24,12 +24,12 @@ final class DirectoryStructureTests: XCTestCase {
         
         // Then
         XCTAssertEqual(graph, [
-            .directory(AbsolutePath("/path/to/workspace/Modules"), [
-                .project(AbsolutePath("/path/to/workspace/Modules/A")),
-                .project(AbsolutePath("/path/to/workspace/Modules/B")),
+            .directory("/path/to/workspace/Modules", [
+                .project("/path/to/workspace/Modules/A"),
+                .project("/path/to/workspace/Modules/B"),
                 .directory("/path/to/workspace/Modules/Sub", [
-                    .project(AbsolutePath("/path/to/workspace/Modules/Sub/C")),
-                    .project(AbsolutePath("/path/to/workspace/Modules/Sub/D")),
+                    .project("/path/to/workspace/Modules/Sub/C"),
+                    .project("/path/to/workspace/Modules/Sub/D"),
                 ])
             ])
         ])
@@ -48,28 +48,54 @@ final class DirectoryStructureTests: XCTestCase {
             "/path/to/workspace/README.md",
         ]
         let fileHandler = try MockFileHandler()
-        let subject = DirectoryStructure(path: AbsolutePath("/path/to/workspace"),
+        let subject = DirectoryStructure(path: "/path/to/workspace",
                                          fileHandler: fileHandler,
                                          projects: projects.map { AbsolutePath($0) },
-                                         files: files.map { AbsolutePath($0) })
+                                         files: files.map { .file(path: AbsolutePath($0)) })
         
         // When
         let graph = try subject.buildGraph()
         
         // Then
         XCTAssertEqual(graph, [
-            .directory(AbsolutePath("/path/to/workspace/Documentation"), [
-                .file(AbsolutePath("/path/to/workspace/Documentation/README.md")),
-                .directory(AbsolutePath("/path/to/workspace/Documentation/generate"), [
-                    .file(AbsolutePath("/path/to/workspace/Documentation/generate/guide.md")),
+            .directory("/path/to/workspace/Documentation", [
+                .file("/path/to/workspace/Documentation/README.md"),
+                .directory("/path/to/workspace/Documentation/generate", [
+                    .file("/path/to/workspace/Documentation/generate/guide.md"),
                 ]),
-                .directory(AbsolutePath("/path/to/workspace/Documentation/setup"), [
-                    .file(AbsolutePath("/path/to/workspace/Documentation/setup/usage.md")),
+                .directory("/path/to/workspace/Documentation/setup", [
+                    .file("/path/to/workspace/Documentation/setup/usage.md"),
                 ]),
             ]),
-            .directory(AbsolutePath("/path/to/workspace/Modules"), [
-                .project(AbsolutePath("/path/to/workspace/Modules/A")),
-                .project(AbsolutePath("/path/to/workspace/Modules/B"))
+            .directory("/path/to/workspace/Modules", [
+                .project("/path/to/workspace/Modules/A"),
+                .project("/path/to/workspace/Modules/B")
+            ]),
+            .file("/path/to/workspace/README.md")
+        ])
+    }
+    
+    func test_buildGraph_folderReferences() throws {
+        // Given
+        let files: [Workspace.Element] = [
+            .folderReference(path: "/path/to/workspace/Documentation/Guides"),
+            .folderReference(path: "/path/to/workspace/Documentation/Proposals"),
+            .file(path: "/path/to/workspace/README.md"),
+        ]
+        let fileHandler = try MockFileHandler()
+        let subject = DirectoryStructure(path: AbsolutePath("/path/to/workspace"),
+                                         fileHandler: fileHandler,
+                                         projects: [],
+                                         files: files)
+        
+        // When
+        let graph = try subject.buildGraph()
+        
+        // Then
+        XCTAssertEqual(graph, [
+            .directory("/path/to/workspace/Documentation", [
+                .folderReference("/path/to/workspace/Documentation/Guides"),
+                .folderReference("/path/to/workspace/Documentation/Proposals")
             ]),
             .file("/path/to/workspace/README.md")
         ])

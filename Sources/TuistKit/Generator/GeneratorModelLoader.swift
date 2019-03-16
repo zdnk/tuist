@@ -63,10 +63,19 @@ extension TuistKit.Workspace {
                     manifestLoader.manifests(at: $0).contains(.project)
             }
         }
+        
+        func workspaceElement(from element: ProjectDescription.Workspace.Element) -> [Workspace.Element] {
+            switch element {
+            case let .glob(pattern: pattern):
+                return globFiles(pattern).map { .file(path: $0) }
+            case let .folderReference(path: folderReferencePath):
+                return [.folderReference(path: AbsolutePath(folderReferencePath, relativeTo: path))]
+            }
+        }
 
         return TuistKit.Workspace(name: manifest.name,
                          projects: manifest.projects.flatMap(globProjects),
-                         additionalFiles: manifest.additionalFiles.flatMap(globFiles))
+                         additionalFiles: manifest.additionalFiles.flatMap(workspaceElement))
     }
 }
 
