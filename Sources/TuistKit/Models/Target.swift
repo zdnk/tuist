@@ -14,7 +14,10 @@ class Target: Equatable {
     let platform: Platform
     let product: Product
     let bundleId: String
-    let infoPlist: AbsolutePath
+
+    // An info.plist file is needed for (dynamic) frameworks, applications and executables
+    // however is not needed for other products such as static libraries.
+    let infoPlist: AbsolutePath?
     let entitlements: AbsolutePath?
     let settings: Settings?
     let dependencies: [Dependency]
@@ -24,6 +27,7 @@ class Target: Equatable {
     let coreDataModels: [CoreDataModel]
     let actions: [TargetAction]
     let environment: [String: String]
+    let filesGroup: ProjectGroup
 
     // MARK: - Init
 
@@ -31,7 +35,7 @@ class Target: Equatable {
          platform: Platform,
          product: Product,
          bundleId: String,
-         infoPlist: AbsolutePath,
+         infoPlist: AbsolutePath? = nil,
          entitlements: AbsolutePath? = nil,
          settings: Settings? = nil,
          sources: [AbsolutePath] = [],
@@ -40,6 +44,7 @@ class Target: Equatable {
          coreDataModels: [CoreDataModel] = [],
          actions: [TargetAction] = [],
          environment: [String: String] = [:],
+         filesGroup: ProjectGroup,
          dependencies: [Dependency] = []) {
         self.name = name
         self.product = product
@@ -54,6 +59,7 @@ class Target: Equatable {
         self.coreDataModels = coreDataModels
         self.actions = actions
         self.environment = environment
+        self.filesGroup = filesGroup
         self.dependencies = dependencies
     }
 
@@ -121,11 +127,11 @@ class Target: Equatable {
 extension Sequence where Element == Target {
     /// Filters and returns only the targets that are test bundles.
     var testBundles: [Target] {
-        return filter({ $0.product.testsBundle })
+        return filter { $0.product.testsBundle }
     }
 
     /// Filters and returns only the targets that are apps.
     var apps: [Target] {
-        return filter({ $0.product == .app })
+        return filter { $0.product == .app }
     }
 }
