@@ -21,11 +21,18 @@ final class DerivedFileGenerator: DerivedFileGenerating {
     /// File handler instance.
     let fileHandler: FileHandling
 
+    /// Info.plist content provider.
+    let infoPlistContentProvider: InfoPlistContentProviding
+
     /// Initializes the generator with its attributes.
     ///
-    /// - Parameter fileHandler: File handler instance.
-    init(fileHandler: FileHandling = FileHandler()) {
+    /// - Parameters:
+    ///   - fileHandler: Instance to interact with the file system.
+    ///   - infoPlistContentProvider: Info.plist content provider.
+    init(fileHandler: FileHandling = FileHandler(),
+         infoPlistContentProvider: InfoPlistContentProviding = InfoPlistContentProvider()) {
         self.fileHandler = fileHandler
+        self.infoPlistContentProvider = infoPlistContentProvider
     }
 
     /// Generates the derived files that are associated to the given project.
@@ -57,8 +64,7 @@ final class DerivedFileGenerator: DerivedFileGenerating {
     func generateInfoPlists(project: Project, sourceRootPath: AbsolutePath) throws -> Set<AbsolutePath> {
         let infoPlistsPath = DerivedFileGenerator.infoPlistsPath(sourceRootPath: sourceRootPath)
         let targetsWithGeneratableInfoPlists = project.targets.filter {
-            guard let infoPlist = $0.infoPlist else { return false }
-            guard case InfoPlist.dictionary = infoPlist else { return false }
+            guard let _ = $0.infoPlist else { return false }
             return true
         }
 
@@ -77,13 +83,19 @@ final class DerivedFileGenerator: DerivedFileGenerating {
         // Generate the Info.plist
         try targetsWithGeneratableInfoPlists.forEach { target in
             guard let infoPlist = target.infoPlist else { return }
-            guard case let InfoPlist.dictionary(dictionary) = infoPlist else { return }
+            var dictionary: [String: Any]?
+
+            if case let InfoPlist.dictionary(_dictionary) = infoPlist {
+                dictionary = _dictionary.mapValues { $0.value }
+            } else if case let InfoPlist.extendingDefault(extended) = infoPlist {
+                dictionary = self.infoPlistContentProvider.content(target: target, extendedWith: extended)
+            }
+            if dictionary == nil { return }
 
             let path = DerivedFileGenerator.infoPlistPath(target: target, sourceRootPath: sourceRootPath)
             if fileHandler.exists(path) { try fileHandler.delete(path) }
 
-            let outputDictionary = dictionary.mapValues { $0.value }
-            let data = try PropertyListSerialization.data(fromPropertyList: outputDictionary,
+            let data = try PropertyListSerialization.data(fromPropertyList: dictionary!,
                                                           format: .xml,
                                                           options: 0)
 
